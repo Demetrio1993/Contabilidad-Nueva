@@ -67,13 +67,14 @@ export async function vistaTransacciones(id) {
     const suma = (tipos, campoN) => filas.filter((t) => tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
     const chip = (titulo, valor) => h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, titulo), h('strong', null, dinero(valor)));
-    resumen.replaceChildren(
+    resumen.replaceChildren(...[
       chip('Ventas', suma(['venta'], 'monto_bruto')),
       empresa.contribuyente_itbms ? chip('ITBMS cobrado', suma(['venta'], 'itbms')) : null,
       chip('Compras y gastos', suma(COMPRAS, 'monto_bruto')),
       empresa.contribuyente_itbms ? chip('ITBMS pagado', suma(COMPRAS, 'itbms')) : null,
       chip('Cobros', suma(['cobro_cliente'], 'monto_neto')),
-      chip('Pagos', suma(['pago_proveedor'], 'monto_neto')));
+      chip('Pagos', suma(['pago_proveedor'], 'monto_neto'))
+    ].filter(Boolean));
     if (filas.length === 0) {
       lista.replaceChildren(h('p', { class: 'cargando' }, 'No hay transacciones en este mes.'));
       return;
@@ -306,7 +307,7 @@ export async function vistaTransacciones(id) {
         campo('Descripción breve', h('input', { type: 'text', value: st.descripcion, oninput: (e) => { st.descripcion = e.target.value; } })),
         campo(llevaItbms() ? 'Monto bruto (sin ITBMS)' : 'Monto', brutoIn),
         bloqueItbms,
-        h('p', { class: 'total-linea' }, 'Total: B/. ', totalEl),
+        h('p', { class: 'total-linea' }, 'Total: ', totalEl),
         formaSel ? campo('Forma de pago', formaSel) : null,
         campo(etqPrincipal, h('select', { value: st.principal, onchange: (e) => { st.principal = e.target.value; } },
           opcionesCuentas(lp, 'Elige una cuenta'))),

@@ -115,7 +115,7 @@ export function marco(...contenido) {
 export function marcoEmpresa(empresa, pestana, contenido) {
   const pestanas = [
     ['transacciones', 'Transacciones'],
-    ['terceros', 'Clientes y proveedores'],
+    ['terceros', 'Clientes y prov.'],
     ['catalogo', 'Catálogo'],
     ['datos', 'Datos']
   ];
