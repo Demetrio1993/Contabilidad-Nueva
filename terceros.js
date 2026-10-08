@@ -5,8 +5,8 @@ const TIPOS = { cliente: 'Cliente', proveedor: 'Proveedor', ambos: 'Cliente y pr
 
 // Abre el formulario de un cliente o proveedor (nuevo si tercero es null).
 // alGuardar recibe la fila guardada.
-export function abrirTercero(empresaId, tercero, tipoSugerido, alGuardar) {
-  const t = tercero || {};
+export function abrirTercero(empresaId, tercero, tipoSugerido, alGuardar, datosIniciales) {
+  const t = tercero || datosIniciales || {};
   const nuevo = !tercero;
   const f = {
     tipo: h('select', { value: t.tipo ?? tipoSugerido ?? 'proveedor' },

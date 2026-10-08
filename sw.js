@@ -1,9 +1,9 @@
 // Service worker: permite instalar la app y, si no hay internet, abrir la
 // última versión guardada. Siempre intenta primero la red para que las
 // actualizaciones lleguen. No guarda nada de Supabase ni de otros sitios.
-const CACHE = 'contabilidad-v3';
+const CACHE = 'contabilidad-v4';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib.js', 'terceros.js',
-                  'transacciones.js', 'config.js', 'manifest.json',
+                  'transacciones.js', 'ocr.js', 'config.js', 'manifest.json',
                   'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

@@ -1,6 +1,7 @@
 // Libro de transacciones: ventas, compras, costos, gastos, cobros, pagos y otros
 import { db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
 import { abrirTercero } from './terceros.js';
+import { panelEscaneo } from './ocr.js';
 
 const TIPOS_TRX = {
   venta: 'Venta',
@@ -123,7 +124,8 @@ export async function vistaTransacciones(id) {
   function abrirNueva() {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
-      modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false
+      modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
+      lectura: null, nuevoTercero: null
     };
     const cuerpo = h('div');
     let cerrar;
@@ -134,6 +136,8 @@ export async function vistaTransacciones(id) {
     const esCredito = () => esFactura() && st.forma === 'credito';
 
     function porDefecto() {
+      st.lectura = null;
+      st.nuevoTercero = null;
       st.forma = 'contado';
       st.tercero = '';
       st.principal = '';
@@ -179,6 +183,64 @@ export async function vistaTransacciones(id) {
       const i = itbmsValor();
       if (itbmsEl && st.modoItbms !== 'm') itbmsEl.value = i.toFixed(2);
       totalEl.textContent = dinero(b + i);
+    }
+
+    // Pasa lo leído de la factura al formulario; el usuario lo revisa antes de registrar
+    function aplicarLectura(d) {
+      const esVenta = st.tipo === 'venta';
+      const otra = esVenta ? d.receptor : d.emisor;
+      if (d.fecha) st.fecha = d.fecha;
+      if (d.numero_factura) st.factura = d.numero_factura;
+      if (d.descripcion) st.descripcion = d.descripcion;
+
+      const itbms = Number(d.itbms) || 0;
+      if (llevaItbms()) {
+        let sub = d.subtotal;
+        if (sub === null && d.total !== null) sub = Math.round((d.total - itbms) * 100) / 100;
+        if (sub !== null) st.bruto = String(sub);
+        if (itbms > 0) { st.modoItbms = 'm'; st.itbmsManual = itbms.toFixed(2); } else { st.modoItbms = '0'; }
+      } else if (d.total !== null) {
+        st.bruto = String(d.total);
+      } else if (d.subtotal !== null) {
+        st.bruto = String(Math.round((d.subtotal + itbms) * 100) / 100);
+      }
+
+      st.nuevoTercero = null;
+      if (otra && (otra.ruc || otra.nombre)) {
+        const norm = (v) => String(v || '').replace(/[\s.]/g, '').toUpperCase();
+        const hallado = tercerosVisibles().find((t) => t.ruc && otra.ruc && norm(t.ruc) === norm(otra.ruc) &&
+          (!t.dv || !otra.dv || norm(t.dv) === norm(otra.dv)));
+        if (hallado) st.tercero = hallado.id;
+        else st.nuevoTercero = otra;
+      }
+      if (d.cuenta_sugerida) {
+        const c = principales().find((x) => x.numero === d.cuenta_sugerida);
+        if (c) st.principal = c.id;
+      }
+      st.lectura = d;
+      pintarForm();
+    }
+
+    function bloqueLectura() {
+      if (!st.lectura) return null;
+      const d = st.lectura;
+      const rolTercero = st.tipo === 'venta' ? 'cliente' : 'proveedor';
+      return h('div', { class: 'aviso-lectura' },
+        h('strong', null, 'Datos leídos de la factura. Revísalos antes de registrar.'),
+        d.confianza !== 'alta' ? h('p', null, `Confianza de la lectura: ${d.confianza}.`) : null,
+        d.observaciones ? h('p', null, d.observaciones) : null,
+        st.nuevoTercero ? h('div', null,
+          h('p', null, `No encontré a ${st.nuevoTercero.nombre || 'este contacto'}${st.nuevoTercero.ruc ? ' (RUC ' + st.nuevoTercero.ruc + ')' : ''} entre tus clientes y proveedores.`),
+          h('button', {
+            class: 'btn btn-peq', type: 'button',
+            onclick: () => abrirTercero(id, null, rolTercero, (fila) => {
+              terceros.push(fila);
+              st.tercero = fila.id;
+              st.nuevoTercero = null;
+              pintarForm();
+            }, { razon_social: st.nuevoTercero.nombre, ruc: st.nuevoTercero.ruc, dv: st.nuevoTercero.dv })
+          }, 'Crear con los datos de la factura')) : null,
+        d.items && d.items.length ? h('p', { class: 'ayuda' }, `La factura tiene ${d.items.length} renglón(es) de detalle.`) : null);
     }
 
     const opcionesCuentas = (lista, vacio) => [
@@ -299,6 +361,16 @@ export async function vistaTransacciones(id) {
 
       cuerpo.replaceChildren(h('form', { onsubmit: guardar },
         campo('Tipo de transacción', tipoSel),
+        esFactura() ? panelEscaneo({
+          obtenerContexto: () => ({
+            rol: st.tipo === 'venta' ? 'cliente' : 'proveedor',
+            contribuyente: !!empresa.contribuyente_itbms,
+            cuentas: principales().filter((c) => c.acepta_movimientos !== false).slice(0, 150)
+              .map((c) => `${c.numero} ${c.nombre}`)
+          }),
+          alLeer: aplicarLectura
+        }) : null,
+        bloqueLectura(),
         campo('Fecha', h('input', { type: 'date', required: true, value: st.fecha, onchange: (e) => { st.fecha = e.target.value; } })),
         terceroSel,
         esFactura() || st.tipo === 'cobro_cliente' || st.tipo === 'pago_proveedor'

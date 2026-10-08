@@ -172,3 +172,6 @@ input[type="number"], input[type="month"] {
   background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px;
 }
 input[readonly] { opacity: 0.75; }
+
+.aviso-lectura { background: color-mix(in srgb, var(--aviso) 14%, transparent); border: 1px solid var(--aviso); border-radius: var(--radio); padding: 10px 12px; margin-bottom: 12px; font-size: 0.9rem; }
+.aviso-lectura p { margin: 6px 0 0; }
