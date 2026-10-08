@@ -9,6 +9,7 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false };
+export const VERSION = '6 · escáner de facturas';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -109,7 +110,8 @@ export function marco(...contenido) {
       h('div', { class: 'barra-der' },
         h('span', { class: 'correo' }, estado.email),
         h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: salir }, 'Salir'))),
-    h('main', { class: 'contenido' }, contenido));
+    h('main', { class: 'contenido' }, contenido),
+    h('footer', { class: 'pie' }, 'Versión ' + VERSION));
 }
 
 export function marcoEmpresa(empresa, pestana, contenido) {
