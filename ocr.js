@@ -76,13 +76,46 @@ export function normalizarLectura(d) {
   };
 }
 
+// Supabase a veces nombra las funciones solas (bright-api, etc.). Se prueban
+// los nombres posibles y se usa el primero que responda.
+const NOMBRES_FUNCION = ['ocr-factura', 'bright-api'];
+let nombreFuncion = null;
+
+async function ubicarFuncion() {
+  if (nombreFuncion) return nombreFuncion;
+  const intentos = [];
+  for (const n of NOMBRES_FUNCION) {
+    try {
+      const r = await fetch(SUPABASE_URL + '/functions/v1/' + n, {
+        method: 'GET',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY }
+      });
+      const j = await r.json().catch(() => null);
+      if (r.ok && j && j.ok) {
+        if (j.gemini_key === false) {
+          throw new Error('La función ' + n + ' responde, pero falta el secreto GEMINI_API_KEY en Supabase.');
+        }
+        nombreFuncion = n;
+        return n;
+      }
+      intentos.push(n + ': ' + r.status);
+    } catch (e) {
+      if (e && /GEMINI_API_KEY/.test(e.message)) throw e;
+      intentos.push(n + ': sin respuesta');
+    }
+  }
+  throw new Error('La función de lectura no responde (' + intentos.join('; ') +
+    '). Revisa en Supabase que esté desplegada con el código de ocr-factura.txt.');
+}
+
 export async function leerFactura(archivo, contexto) {
   const { mime, data } = await prepararArchivo(archivo);
+  const nombre = await ubicarFuncion();
   const { data: sesion } = await db.auth.getSession();
   const token = (sesion && sesion.session && sesion.session.access_token) || SUPABASE_ANON_KEY;
   let r;
   try {
-    r = await fetch(SUPABASE_URL + '/functions/v1/ocr-factura', {
+    r = await fetch(SUPABASE_URL + '/functions/v1/' + nombre, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -92,14 +125,14 @@ export async function leerFactura(archivo, contexto) {
       body: JSON.stringify({ mime, data, ...contexto })
     });
   } catch (_e) {
-    throw new Error('No llegó a la función ocr-factura. Revisa que exista en Supabase con ese nombre exacto y que tengas internet.');
+    nombreFuncion = null;
+    throw new Error('Se perdió la conexión al enviar la factura. Revisa tu internet e intenta de nuevo.');
   }
   let resp = null;
   try { resp = await r.json(); } catch (_e) { /* sin cuerpo */ }
   if (!r.ok) {
     const detalle = (resp && (resp.error || resp.message)) || '';
-    if (r.status === 404) throw new Error('La función ocr-factura no está desplegada en Supabase (404).');
-    if (r.status === 401) throw new Error('La función rechazó el acceso (401). Desactiva "Verify JWT" o vuelve a iniciar sesión. ' + detalle);
+    if (r.status === 401) throw new Error('La función rechazó el acceso (401). Desactiva "Verify JWT" en sus ajustes. ' + detalle);
     throw new Error(detalle || 'Error de la función (código ' + r.status + ').');
   }
   if (!resp || resp.error || !resp.datos) throw new Error((resp && resp.error) || 'No se pudo leer la factura.');
