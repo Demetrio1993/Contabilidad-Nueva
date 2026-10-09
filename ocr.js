@@ -1,5 +1,6 @@
 // Lectura de facturas con IA: foto, galería o PDF -> datos para el formulario
 import { db, h, toast } from './lib.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const MAX_LADO = 1600;       // las fotos se reducen para enviarlas más rápido
 const MAX_PDF = 6 * 1024 * 1024;
@@ -42,17 +43,6 @@ async function prepararArchivo(archivo) {
   throw new Error('Usa una foto o un PDF.');
 }
 
-async function mensajeDeError(error) {
-  const resp = error && error.context;
-  if (resp && typeof resp.json === 'function') {
-    try {
-      const j = await resp.json();
-      if (j && j.error) return j.error;
-    } catch (_e) { /* sin detalle */ }
-  }
-  return (error && error.message) || 'No se pudo leer la factura.';
-}
-
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(String(v).replace(/[^0-9.\-]/g, ''));
@@ -88,10 +78,30 @@ export function normalizarLectura(d) {
 
 export async function leerFactura(archivo, contexto) {
   const { mime, data } = await prepararArchivo(archivo);
-  const { data: resp, error } = await db.functions.invoke('ocr-factura', {
-    body: { mime, data, ...contexto }
-  });
-  if (error) throw new Error(await mensajeDeError(error));
+  const { data: sesion } = await db.auth.getSession();
+  const token = (sesion && sesion.session && sesion.session.access_token) || SUPABASE_ANON_KEY;
+  let r;
+  try {
+    r = await fetch(SUPABASE_URL + '/functions/v1/ocr-factura', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + token
+      },
+      body: JSON.stringify({ mime, data, ...contexto })
+    });
+  } catch (_e) {
+    throw new Error('No llegó a la función ocr-factura. Revisa que exista en Supabase con ese nombre exacto y que tengas internet.');
+  }
+  let resp = null;
+  try { resp = await r.json(); } catch (_e) { /* sin cuerpo */ }
+  if (!r.ok) {
+    const detalle = (resp && (resp.error || resp.message)) || '';
+    if (r.status === 404) throw new Error('La función ocr-factura no está desplegada en Supabase (404).');
+    if (r.status === 401) throw new Error('La función rechazó el acceso (401). Desactiva "Verify JWT" o vuelve a iniciar sesión. ' + detalle);
+    throw new Error(detalle || 'Error de la función (código ' + r.status + ').');
+  }
   if (!resp || resp.error || !resp.datos) throw new Error((resp && resp.error) || 'No se pudo leer la factura.');
   return normalizarLectura(resp.datos);
 }

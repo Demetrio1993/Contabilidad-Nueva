@@ -9,7 +9,7 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false };
-export const VERSION = '6 · escáner de facturas';
+export const VERSION = '7 · escáner corregido';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
