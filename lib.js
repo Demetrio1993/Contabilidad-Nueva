@@ -9,7 +9,7 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false };
-export const VERSION = '8 · escáner con comprobación';
+export const VERSION = '9 · informes contables';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -117,6 +117,7 @@ export function marco(...contenido) {
 export function marcoEmpresa(empresa, pestana, contenido) {
   const pestanas = [
     ['transacciones', 'Transacciones'],
+    ['informes', 'Informes'],
     ['terceros', 'Clientes y prov.'],
     ['catalogo', 'Catálogo'],
     ['datos', 'Datos']

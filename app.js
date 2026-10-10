@@ -5,6 +5,7 @@ import {
 } from './lib.js';
 import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
+import { vistaInformes } from './informes.js';
 
 /* ============================== acceso =============================== */
 
@@ -438,6 +439,7 @@ async function render() {
     if (p[0] === 'empresa' && p[1]) {
       const id = p[1];
       if (p[2] === 'catalogo') await vistaCatalogo(id);
+      else if (p[2] === 'informes') await vistaInformes(id);
       else if (p[2] === 'terceros') await vistaTerceros(id);
       else if (p[2] === 'datos') await vistaEmpresaDatos(id);
       else await vistaTransacciones(id);
