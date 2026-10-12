@@ -6,6 +6,8 @@ import {
 import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
 import { vistaInformes } from './informes.js';
+import { vistaEstados } from './estados.js';
+import { vistaCierre } from './cierre.js';
 
 /* ============================== acceso =============================== */
 
@@ -440,6 +442,8 @@ async function render() {
       const id = p[1];
       if (p[2] === 'catalogo') await vistaCatalogo(id);
       else if (p[2] === 'informes') await vistaInformes(id);
+      else if (p[2] === 'estados') await vistaEstados(id);
+      else if (p[2] === 'cierre') await vistaCierre(id);
       else if (p[2] === 'terceros') await vistaTerceros(id);
       else if (p[2] === 'datos') await vistaEmpresaDatos(id);
       else await vistaTransacciones(id);

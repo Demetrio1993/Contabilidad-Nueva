@@ -4,6 +4,7 @@ import {
   db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta,
   traducirError, cargando, marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
+import { exportarExcel, exportarPdf } from './exportar.js';
 
 const ORIGENES = {
   manual: 'Manual', ajuste: 'Ajuste', apertura: 'Apertura', transaccion: 'Transacción',
@@ -32,9 +33,33 @@ function chip(etiqueta, valor) {
   return h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, etiqueta), h('strong', null, valor));
 }
 
+/* --------------- botones "Descargar Excel" y "Descargar PDF" --------------- */
+
+// obtener() devuelve { specs: [...], archivo } o null si aún no hay nada que exportar.
+export function barraExportar({ empresa, obtener, etiquetaExcel, etiquetaPdf }) {
+  const hacer = (tipo) => async (ev) => {
+    const boton = ev && ev.target;
+    if (boton) boton.disabled = true;
+    try {
+      const r = await obtener();
+      if (!r) { toast('No hay datos para exportar. Elige un informe con información.', 'error'); return; }
+      const meta = { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } };
+      const nombre = tipo === 'xlsx' ? exportarExcel(r.specs, meta, r.archivo) : exportarPdf(r.specs, meta, r.archivo);
+      toast(`Se descargó ${nombre}`, 'ok');
+    } catch (e) {
+      toast('No se pudo crear el archivo: ' + traducirError(e), 'error');
+    } finally {
+      if (boton) boton.disabled = false;
+    }
+  };
+  return h('div', { class: 'acciones' },
+    h('button', { class: 'btn btn-sec', type: 'button', onclick: hacer('xlsx') }, etiquetaExcel || 'Descargar Excel'),
+    h('button', { class: 'btn btn-sec', type: 'button', onclick: hacer('pdf') }, etiquetaPdf || 'Descargar PDF'));
+}
+
 /* ------------------------- asiento de ajuste manual ------------------------ */
 
-function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
+export function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
   const fecha = h('input', { type: 'date', value: fechaInicial });
   const desc = h('input', { type: 'text', placeholder: 'Ej.: Ajuste por gasto acumulado' });
   const ref = h('input', { type: 'text', placeholder: 'Opcional' });
@@ -145,6 +170,10 @@ export async function vistaInformes(id) {
     ? `Año ${est.anio}`
     : `Mes ${est.mes.split('-')[1]}/${est.mes.split('-')[0]}`);
 
+  const ORIENTE = (o) => ORIGENES[o] || o;
+  const nulo0 = (v) => (Number(v || 0) === 0 ? null : Number(v));
+  const archivoDe = (informe) => `${empresa.razon_social}-${informe}-${est.modo === 'anio' ? est.anio : est.mes}`;
+
   /* ---- diario ---- */
   async function diario() {
     const [d, hasta] = rango();
@@ -154,11 +183,21 @@ export async function vistaInformes(id) {
       .order('fecha').order('consecutivo').range(0, 4999);
     if (error) throw error;
     let td = 0; let tc = 0;
+    const filasSpec = [];
     const tarjetas = data.map((a) => {
       const ls = (a.asiento_lineas || []).slice().sort((x, y) =>
         (Number(y.debito) > 0) - (Number(x.debito) > 0) ||
         String((x.cuentas || {}).numero).localeCompare(String((y.cuentas || {}).numero)));
-      ls.forEach((l) => { td += Number(l.debito); tc += Number(l.credito); });
+      ls.forEach((l, i) => {
+        td += Number(l.debito); tc += Number(l.credito);
+        filasSpec.push({
+          c: [i === 0 ? fechaCorta(a.fecha) : '', i === 0 ? String(a.consecutivo) : '',
+            l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` : '',
+            i === 0 ? a.descripcion + (a.referencia ? ` · ${a.referencia}` : '') : '',
+            nulo0(l.debito), nulo0(l.credito)],
+          e: i === 0 ? 'normal' : 'normal'
+        });
+      });
       return h('div', { class: 'tarjeta' },
         h('div', { class: 'trx-linea' },
           h('strong', null, `N.º ${a.consecutivo}`),
@@ -171,7 +210,8 @@ export async function vistaInformes(id) {
           h('span', { class: 'monto' }, nz(l.debito)),
           h('span', { class: 'monto' }, nz(l.credito)))));
     });
-    return h('div', null,
+    filasSpec.push({ c: ['', '', 'Totales', '', redondear(td), redondear(tc)], e: 'total' });
+    const nodo = h('div', null,
       h('div', { class: 'resumen' },
         chip('Asientos', String(data.length)),
         chip('Débitos = Créditos', redondear(td) === redondear(tc) ? 'Cuadrado' : 'Descuadrado'),
@@ -180,25 +220,34 @@ export async function vistaInformes(id) {
       h('div', { class: 'acciones' },
         h('button', { class: 'btn', type: 'button', onclick: () => abrirAjuste(id, cuentas, rango()[1], pintar) }, '+ Asiento de ajuste')),
       data.length ? tarjetas : h('p', { class: 'ayuda' }, 'No hay asientos en este período.'));
+    const spec = data.length ? {
+      titulo: 'Diario general', subtitulo: etiquetaPeriodo(), hoja: 'Diario general',
+      columnas: [{ t: 'Fecha', w: 1 }, { t: 'N.º', w: 0.7 }, { t: 'Cuenta', w: 2.6 }, { t: 'Descripción', w: 2.6 },
+        { t: 'Débito', num: true }, { t: 'Crédito', num: true }],
+      filas: filasSpec
+    } : null;
+    return { nodo, spec, archivo: archivoDe('diario') };
   }
-  const ORIENTE = (o) => ORIGENES[o] || o;
 
   /* ---- mayor ---- */
   async function mayor() {
-    if (!est.cuentaId) return h('p', { class: 'ayuda' }, 'Elige una cuenta para ver su mayor. Aquí aparecen las cuentas que reciben movimientos.');
+    if (!est.cuentaId) {
+      return { nodo: h('p', { class: 'ayuda' }, 'Elige una cuenta para ver su mayor. Aquí aparecen las cuentas que reciben movimientos.'), spec: null };
+    }
     const [d, hasta] = rango();
     const { data, error } = await db.from('v_mayor')
       .select('fecha, consecutivo, descripcion, referencia, debito, credito, saldo')
       .eq('empresa_id', id).eq('cuenta_id', est.cuentaId).lte('fecha', hasta)
       .order('fecha').order('consecutivo').range(0, 4999);
     if (error) throw error;
+    const cuenta = cuentas.find((c) => c.id === est.cuentaId) || { numero: '', nombre: '' };
     const antes = data.filter((m) => m.fecha < d);
     const saldoIni = antes.length ? Number(antes[antes.length - 1].saldo) : 0;
     const movs = data.filter((m) => m.fecha >= d);
     const td = movs.reduce((s, m) => s + Number(m.debito), 0);
     const tc = movs.reduce((s, m) => s + Number(m.credito), 0);
     const saldoFin = movs.length ? Number(movs[movs.length - 1].saldo) : saldoIni;
-    return h('div', null,
+    const nodo = h('div', null,
       h('div', { class: 'resumen' },
         chip('Saldo anterior', dinero(saldoIni)), chip('Saldo final', dinero(saldoFin)),
         chip('Débitos', dinero(td)), chip('Créditos', dinero(tc))),
@@ -212,6 +261,15 @@ export async function vistaInformes(id) {
             celda(m.descripcion + (m.referencia ? ` · ${m.referencia}` : '')),
             celda(nz(m.debito), 'num'), celda(nz(m.credito), 'num'), celda(n2(m.saldo), 'num'))))))
         : h('p', { class: 'ayuda' }, 'Esta cuenta no tiene movimientos en el período.'));
+    const spec = {
+      titulo: `Mayor general · ${cuenta.numero} ${cuenta.nombre}`, subtitulo: etiquetaPeriodo(), hoja: 'Mayor general',
+      columnas: [{ t: 'Fecha', w: 1 }, { t: 'Descripción', w: 4 }, { t: 'Débito', num: true }, { t: 'Crédito', num: true }, { t: 'Saldo', num: true }],
+      filas: [
+        { c: ['', 'Saldo anterior', null, null, redondear(saldoIni)], e: 'grupo' },
+        ...movs.map((m) => ({ c: [fechaCorta(m.fecha), m.descripcion + (m.referencia ? ` · ${m.referencia}` : ''), nulo0(m.debito), nulo0(m.credito), Number(m.saldo)] })),
+        { c: ['', 'Totales y saldo final', redondear(td), redondear(tc), redondear(saldoFin)], e: 'total' }]
+    };
+    return { nodo, spec, archivo: archivoDe(`mayor-${cuenta.numero}`) };
   }
 
   /* ---- balance de comprobación ---- */
@@ -226,7 +284,7 @@ export async function vistaInformes(id) {
     const sd = redondear(suma(raiz, 'saldo_final_deudor'));
     const sa = redondear(suma(raiz, 'saldo_final_acreedor'));
     const sant = (v) => (Number(v) < 0 ? `${n2(-v)} A` : nz(v));
-    return h('div', null,
+    const nodo = h('div', null,
       h('div', { class: 'resumen' },
         chip('Saldos deudores', dinero(sd)), chip('Saldos acreedores', dinero(sa)),
         chip('Resultado', sd === sa ? 'Cuadrado' : 'Descuadrado'),
@@ -248,6 +306,20 @@ export async function vistaInformes(id) {
             celda(n2(suma(raiz, 'debitos')), 'num'), celda(n2(suma(raiz, 'creditos')), 'num'),
             celda(n2(sd), 'num'), celda(n2(sa), 'num')))))
         : h('p', { class: 'ayuda' }, 'No hay movimientos en el período.'));
+    const spec = filas.length ? {
+      titulo: 'Balance de comprobación', subtitulo: etiquetaPeriodo(), hoja: 'Balance de comprobación',
+      columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Saldo anterior', num: true }, { t: 'Débitos', num: true },
+        { t: 'Créditos', num: true }, { t: 'Saldo deudor', num: true }, { t: 'Saldo acreedor', num: true }],
+      filas: [
+        ...filas.map((r) => ({
+          c: [`${r.numero} ${r.nombre}`, nulo0(r.saldo_anterior), nulo0(r.debitos), nulo0(r.creditos),
+            nulo0(r.saldo_final_deudor), nulo0(r.saldo_final_acreedor)],
+          e: Number(r.nivel) === 1 ? 'n1' : (Number(r.nivel) === 2 ? 'n2' : 'normal')
+        })),
+        { c: ['Totales (cuentas de nivel 1)', null, redondear(suma(raiz, 'debitos')), redondear(suma(raiz, 'creditos')), sd, sa], e: 'total' }],
+      notas: ['Saldo anterior: positivo = deudor, negativo = acreedor. Los totales suman solo las cuentas de nivel 1 para no contar dos veces.']
+    } : null;
+    return { nodo, spec, archivo: archivoDe('balance-comprobacion') };
   }
 
   /* ---- hoja de trabajo ---- */
@@ -260,7 +332,7 @@ export async function vistaInformes(id) {
     claves.forEach((k) => { tot[k] = redondear(data.reduce((s, r) => s + Number(r[k] || 0), 0)); });
     const utilidad = redondear(tot.er_haber - tot.er_debe);
     const cols = [['Comprobación', 'comp'], ['Ajustes', 'aj'], ['Ajustada', 'ajust'], ['Resultados', 'er'], ['Balance', 'bg']];
-    return h('div', null,
+    const nodo = h('div', null,
       h('div', { class: 'resumen' },
         chip('Comprobación', tot.comp_debe === tot.comp_haber ? 'Cuadrada' : 'Descuadrada'),
         chip(utilidad >= 0 ? 'Utilidad del período' : 'Pérdida del período', dinero(Math.abs(utilidad))),
@@ -276,6 +348,16 @@ export async function vistaInformes(id) {
             claves.map((k) => celda(nz(r[k]), 'num'))))),
           h('tfoot', null, h('tr', null, celda('Totales'), claves.map((k) => celda(n2(tot[k]), 'num'))))))
         : h('p', { class: 'ayuda' }, 'No hay movimientos en el período.'));
+    const spec = data.length ? {
+      titulo: 'Hoja de trabajo', subtitulo: etiquetaPeriodo(), hoja: 'Hoja de trabajo', horizontal: true,
+      grupos: [{ t: 'Cuenta', n: 1, r: 2 }, ...cols.map(([t]) => ({ t, n: 2 }))],
+      columnas: [{ t: 'Cuenta', w: 1 }, ...claves.map((k) => ({ t: k.endsWith('debe') ? 'Debe' : 'Haber', num: true }))],
+      filas: [
+        ...data.map((r) => ({ c: [`${r.numero} ${r.nombre}`, ...claves.map((k) => nulo0(r[k]))] })),
+        { c: ['Totales', ...claves.map((k) => tot[k])], e: 'total' }],
+      notas: [`${utilidad >= 0 ? 'Utilidad' : 'Pérdida'} del período: ${n2(Math.abs(utilidad))}`]
+    } : null;
+    return { nodo, spec, archivo: archivoDe('hoja-de-trabajo') };
   }
 
   const construir = { diario, mayor, balance, hoja };
@@ -283,8 +365,16 @@ export async function vistaInformes(id) {
   async function pintar() {
     zona.replaceChildren(cargando());
     try {
-      zona.replaceChildren(await construir[est.informe]());
+      const r = await construir[est.informe]();
+      est.actual = r;
+      zona.replaceChildren(
+        h('div', { class: 'barra-exportar' }, barraExportar({
+          empresa,
+          obtener: () => (est.actual && est.actual.spec ? { specs: [est.actual.spec], archivo: est.actual.archivo } : null)
+        })),
+        r.nodo);
     } catch (e) {
+      est.actual = null;
       zona.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null, traducirError(e))));
     }
   }
