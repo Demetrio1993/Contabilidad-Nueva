@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { barraExportar } from './informes.js';
 import { tablaSimple } from './fiscal.js';
+import { confirmar, barraAcciones } from './acciones.js';
 
 const NUM = (v) => Number(v || 0);
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
@@ -49,37 +50,38 @@ function specTarjeta(item, rows, desde, hasta) {
   };
 }
 
-function abrirArticulo(id, alGuardar) {
+function abrirArticulo(id, alGuardar, existente) {
   const f = {
-    codigo: h('input', { type: 'text', required: true }),
-    nombre: h('input', { type: 'text', required: true }),
-    unidad: h('input', { type: 'text', value: 'unidad' })
+    codigo: h('input', { type: 'text', required: true, value: existente ? existente.codigo : '' }),
+    nombre: h('input', { type: 'text', required: true, value: existente ? existente.nombre : '' }),
+    unidad: h('input', { type: 'text', value: existente ? (existente.unidad || 'unidad') : 'unidad' })
   };
   let cerrar;
   async function guardar(ev) {
     ev.preventDefault();
     if (!texto(f.codigo.value) || !texto(f.nombre.value)) { toast('Escribe el código y el nombre.', 'error'); return; }
-    const r = await db.from('inventario_items').insert({
-      empresa_id: id, codigo: texto(f.codigo.value), nombre: texto(f.nombre.value), unidad: texto(f.unidad.value) || 'unidad'
-    });
+    const datos = { codigo: texto(f.codigo.value), nombre: texto(f.nombre.value), unidad: texto(f.unidad.value) || 'unidad' };
+    const r = existente
+      ? await db.from('inventario_items').update(datos).eq('id', existente.id)
+      : await db.from('inventario_items').insert({ empresa_id: id, ...datos });
     if (r.error) {
       toast(r.error.code === '23505' ? 'Ya existe un artículo con ese código.' : traducirError(r.error), 'error'); return;
     }
-    toast('Artículo guardado.', 'ok'); cerrar(); alGuardar();
+    toast(existente ? 'Cambios guardados.' : 'Artículo guardado.', 'ok'); cerrar(); alGuardar();
   }
-  cerrar = modal('Nuevo artículo', h('form', { onsubmit: guardar },
+  cerrar = modal(existente ? 'Editar artículo' : 'Nuevo artículo', h('form', { onsubmit: guardar },
     campo('Código', f.codigo), campo('Nombre', f.nombre), campo('Unidad de medida', f.unidad),
     h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
 }
 
-function abrirMovimiento(id, items, itemInicial, alGuardar) {
+function abrirMovimiento(id, items, itemInicial, alGuardar, existente) {
   const f = {
-    item: h('select', { required: true }, items.map((i) => h('option', { value: i.id, selected: i.id === itemInicial }, `${i.codigo} ${i.nombre}`))),
-    tipo: h('select', null, h('option', { value: 'entrada' }, 'Entrada (compra)'), h('option', { value: 'salida' }, 'Salida (venta o consumo)')),
-    fecha: h('input', { type: 'date', required: true, value: hoy() }),
-    cantidad: h('input', { type: 'number', step: '0.0001', min: '0.0001', inputmode: 'decimal', required: true }),
-    costo: h('input', { type: 'number', step: '0.0001', min: '0', inputmode: 'decimal', value: '0' }),
-    doc: h('input', { type: 'text' })
+    item: h('select', { required: true }, items.map((i) => h('option', { value: i.id, selected: i.id === (existente ? existente.item_id : itemInicial) }, `${i.codigo} ${i.nombre}`))),
+    tipo: h('select', null, h('option', { value: 'entrada', selected: !existente || existente.tipo === 'entrada' }, 'Entrada (compra)'), h('option', { value: 'salida', selected: !!existente && existente.tipo === 'salida' }, 'Salida (venta o consumo)')),
+    fecha: h('input', { type: 'date', required: true, value: existente ? existente.fecha : hoy() }),
+    cantidad: h('input', { type: 'number', step: '0.0001', min: '0.0001', inputmode: 'decimal', required: true, value: existente ? String(existente.cantidad) : '' }),
+    costo: h('input', { type: 'number', step: '0.0001', min: '0', inputmode: 'decimal', value: existente ? String(existente.costo_unitario) : '0' }),
+    doc: h('input', { type: 'text', value: existente ? (existente.documento || '') : '' })
   };
   let cerrar;
   async function guardar(ev) {
@@ -87,14 +89,17 @@ function abrirMovimiento(id, items, itemInicial, alGuardar) {
     const c = Number(f.cantidad.value); const k = Number(f.costo.value || 0);
     if (!(c > 0)) { toast('La cantidad debe ser mayor que cero.', 'error'); return; }
     if (f.tipo.value === 'entrada' && !(k > 0)) { toast('Escribe el costo de cada unidad de la entrada.', 'error'); return; }
-    const r = await db.from('inventario_movimientos').insert({
-      empresa_id: id, item_id: f.item.value, fecha: f.fecha.value, tipo: f.tipo.value, cantidad: c,
+    const datos = {
+      item_id: f.item.value, fecha: f.fecha.value, tipo: f.tipo.value, cantidad: c,
       costo_unitario: f.tipo.value === 'entrada' ? k : 0, documento: texto(f.doc.value)
-    });
+    };
+    const r = existente
+      ? await db.from('inventario_movimientos').update(datos).eq('id', existente.id)
+      : await db.from('inventario_movimientos').insert({ empresa_id: id, ...datos });
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
-    toast('Movimiento guardado.', 'ok'); cerrar(); alGuardar();
+    toast(existente ? 'Cambios guardados.' : 'Movimiento guardado.', 'ok'); cerrar(); alGuardar();
   }
-  cerrar = modal('Movimiento de inventario', h('form', { onsubmit: guardar },
+  cerrar = modal(existente ? 'Editar movimiento' : 'Movimiento de inventario', h('form', { onsubmit: guardar },
     campo('Artículo', f.item), campo('Tipo', f.tipo), campo('Fecha', f.fecha), campo('Cantidad', f.cantidad),
     campo('Costo unitario (solo entradas)', f.costo, 'En las salidas el sistema calcula el costo por PEPS.'),
     campo('Documento', f.doc),
@@ -120,12 +125,12 @@ export async function vistaInventario(id) {
 
   function armar() {
     const f = [h('select', { onchange: (e) => { est.vista = e.target.value; armar(); pintar(); } },
-      [['valoracion', 'Existencias y valor'], ['tarjeta', 'Tarjeta de un artículo'], ['cierre', 'Cierre mensual']]
+      [['valoracion', 'Existencias y valor'], ['tarjeta', 'Tarjeta de un artículo'], ['movimientos', 'Artículos y movimientos (corregir)'], ['cierre', 'Cierre mensual']]
         .map(([k, n]) => h('option', { value: k, selected: k === est.vista }, n)))];
     if (est.vista === 'valoracion') {
       f.push(h('label', { class: 'campo' }, h('span', { class: 'etiqueta' }, 'Al'),
         h('input', { type: 'date', value: est.fecha, onchange: (e) => { est.fecha = e.target.value; pintar(); } })));
-    } else if (est.vista === 'tarjeta') {
+    } else if (est.vista === 'tarjeta' || est.vista === 'movimientos') {
       f.push(h('select', { onchange: (e) => { est.item = e.target.value; pintar(); } },
         est.items.length ? est.items.map((i) => h('option', { value: i.id, selected: i.id === est.item }, `${i.codigo} ${i.nombre}`))
           : [h('option', { value: '' }, 'Sin artículos')]));
@@ -185,6 +190,65 @@ export async function vistaInventario(id) {
               c: [fechaCorta(x.fecha), x.tipo_mov, x.ent_cantidad === null ? '' : cant(x.ent_cantidad), x.sal_cantidad === null ? '' : cant(x.sal_cantidad),
                 cant(x.saldo_cantidad), NUM(x.saldo_valor)], e: x.orden === 0 ? 'n1' : 'normal'
             })), 'ancha'));
+      } else if (est.vista === 'movimientos') {
+        const recargarTodo = async () => { await cargarItems(); armar(); pintar(); };
+        const item = est.items.find((i) => i.id === est.item);
+        const lista = [];
+        if (item) {
+          const r = await db.from('inventario_movimientos')
+            .select('id, item_id, fecha, tipo, cantidad, costo_unitario, documento')
+            .eq('empresa_id', id).eq('item_id', est.item).gte('fecha', est.desde).lte('fecha', est.hasta)
+            .order('fecha', { ascending: false }).order('creado_en', { ascending: false }).range(0, 499);
+          if (r.error) throw r.error;
+          for (const m of (r.data || [])) {
+            lista.push(h('div', { class: 'tarjeta' },
+              h('div', { class: 'trx-linea' },
+                h('strong', null, m.tipo === 'entrada' ? 'Entrada' : 'Salida'),
+                h('span', { class: 'ayuda' }, fechaCorta(m.fecha)),
+                m.documento ? h('span', { class: 'ayuda' }, m.documento) : null),
+              h('p', null, `${cant(m.cantidad)} ${item.unidad || ''}` + (m.tipo === 'entrada' ? ` a B/. ${NUM(m.costo_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : ' (costo por PEPS)')),
+              barraAcciones({
+                editar: () => abrirMovimiento(id, est.items, est.item, pintar, m),
+                eliminar: () => confirmar({
+                  titulo: 'Eliminar movimiento',
+                  mensaje: 'Se borra este movimiento de la tarjeta. No se puede si el mes ya está cerrado o si deja existencias negativas.',
+                  boton: 'Eliminar',
+                  alConfirmar: async () => {
+                    const d = await db.from('inventario_movimientos').delete().eq('id', m.id);
+                    if (d.error) throw d.error;
+                    toast('Movimiento eliminado.', 'ok'); pintar();
+                  }
+                })
+              })));
+          }
+        }
+        zona.replaceChildren(...[
+          botones(),
+          item ? h('div', { class: 'tarjeta' },
+            h('strong', null, `${item.codigo} ${item.nombre}`),
+            h('p', { class: 'ayuda' }, `Unidad: ${item.unidad || 'unidad'}`),
+            barraAcciones({
+              editar: () => abrirArticulo(id, recargarTodo, item),
+              eliminar: () => confirmar({
+                titulo: 'Eliminar artículo',
+                mensaje: 'Si el artículo tiene movimientos no se borra: queda desactivado y deja de aparecer. Si no tiene, se borra.',
+                boton: 'Eliminar',
+                alConfirmar: async () => {
+                  const c = await db.from('inventario_movimientos').select('id', { count: 'exact', head: true }).eq('item_id', item.id);
+                  if (c.error) throw c.error;
+                  const u = (c.count || 0) > 0
+                    ? await db.from('inventario_items').update({ activo: false }).eq('id', item.id)
+                    : await db.from('inventario_items').delete().eq('id', item.id);
+                  if (u.error) throw u.error;
+                  toast((c.count || 0) > 0 ? 'Artículo desactivado.' : 'Artículo eliminado.', 'ok');
+                  await recargarTodo();
+                }
+              })
+            })) : h('p', { class: 'ayuda' }, 'Crea un artículo para empezar.'),
+          item ? h('h3', null, 'Movimientos del período') : null,
+          item && !lista.length ? h('p', { class: 'ayuda' }, 'No hay movimientos entre esas fechas.') : null,
+          ...lista
+        ].filter(Boolean));
       } else {
         const [ctl, cie] = await Promise.all([
           db.rpc('inventario_control_mes', { p_empresa: id, p_anio: est.anio, p_mes: est.mes }),

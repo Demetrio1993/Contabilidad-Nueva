@@ -2,6 +2,7 @@
 import { db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
 import { abrirTercero } from './terceros.js';
 import { panelEscaneo } from './ocr.js';
+import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 
 const TIPOS_TRX = {
   venta: 'Venta',
@@ -54,10 +55,12 @@ export async function vistaTransacciones(id) {
 
   async function cargarMes() {
     const [d, s] = rangoMes(mes);
-    const r = await db.from('transacciones')
-      .select('id, tipo, fecha, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id')
+    const consulta = (cols) => db.from('transacciones').select(cols)
       .eq('empresa_id', id).gte('fecha', d).lt('fecha', s)
       .order('fecha').order('creado_en');
+    const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id';
+    let r = await consulta(base + ', anulada, motivo_anulacion');
+    if (r.error) r = await consulta(base); // si aún no se ejecutó el archivo 53
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
     filas = r.data;
     selMes.value = mes;
@@ -65,7 +68,7 @@ export async function vistaTransacciones(id) {
   }
 
   function pintar() {
-    const suma = (tipos, campoN) => filas.filter((t) => tipos.includes(t.tipo))
+    const suma = (tipos, campoN) => filas.filter((t) => !t.anulada && tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
     const chip = (titulo, valor) => h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, titulo), h('strong', null, dinero(valor)));
     resumen.replaceChildren(...[
@@ -80,9 +83,10 @@ export async function vistaTransacciones(id) {
       lista.replaceChildren(h('p', { class: 'cargando' }, 'No hay transacciones en este mes.'));
       return;
     }
-    lista.replaceChildren(...filas.map((t) => h('button', { class: 'trx', type: 'button', onclick: () => detalle(t) },
+    lista.replaceChildren(...filas.map((t) => h('button', { class: 'trx' + (t.anulada ? ' anulada' : ''), type: 'button', onclick: () => detalle(t) },
       h('div', { class: 'trx-linea' },
         h('span', { class: 'insignia' }, TIPOS_TRX[t.tipo]),
+        t.anulada ? h('span', { class: 'insignia aviso' }, 'Anulada') : null,
         h('span', { class: 'ayuda' }, fechaCorta(t.fecha)),
         t.forma === 'credito' ? h('span', { class: 'insignia aviso' }, 'A crédito') : null),
       h('div', { class: 'trx-nom' }, t.nombre_tercero || t.descripcion || '—'),
@@ -96,16 +100,32 @@ export async function vistaTransacciones(id) {
 
   function detalle(t) {
     let cerrar;
-    async function eliminar() {
-      if (!confirm('¿Eliminar esta transacción y su asiento contable? Solo se puede si el mes está abierto.')) return;
-      const { error } = await db.rpc('eliminar_transaccion', { p_transaccion: t.id });
-      if (error) { toast(traducirError(error), 'error'); return; }
-      toast('Transacción eliminada.', 'ok');
-      cerrar();
-      await cargarMes();
-    }
     const dato = (etq, val) => val ? h('p', null, h('strong', null, etq + ': '), val) : null;
-    cerrar = modal(TIPOS_TRX[t.tipo], h('div', null,
+    const recargar = async () => { cerrar(); await cargarMes(); };
+    const acciones = barraAcciones({
+      editar: t.anulada ? null : () => { cerrar(); abrirNueva(t); },
+      anular: t.anulada ? null : () => pedirMotivo({
+        titulo: 'Anular transacción',
+        mensaje: 'Se conserva el registro, pero deja de contar. Se crea un asiento contrario con la misma fecha. Solo se puede si el mes está abierto.',
+        alConfirmar: async (motivo) => {
+          await rpcOk(db, 'anular_transaccion', { p_transaccion: t.id, p_motivo: motivo });
+          toast('Transacción anulada.', 'ok');
+          await recargar();
+        }
+      }),
+      eliminar: () => confirmar({
+        titulo: 'Eliminar transacción',
+        mensaje: 'Se borra la transacción y su asiento contable (y el de anulación, si lo tiene). Solo se puede si el mes está abierto.',
+        boton: 'Eliminar',
+        alConfirmar: async () => {
+          await rpcOk(db, 'eliminar_transaccion', { p_transaccion: t.id });
+          toast('Transacción eliminada.', 'ok');
+          await recargar();
+        }
+      })
+    });
+    cerrar = modal(TIPOS_TRX[t.tipo] + (t.anulada ? ' (anulada)' : ''), h('div', null,
+      t.anulada ? h('p', { class: 'ayuda' }, 'Anulada' + (t.motivo_anulacion ? ': ' + t.motivo_anulacion : '') + '. No cuenta en informes.') : null,
       dato('Fecha', fechaCorta(t.fecha)),
       dato('Cliente o proveedor', t.nombre_tercero),
       dato('RUC', t.ruc ? `${t.ruc}${t.dv ? ' DV ' + t.dv : ''}` : null),
@@ -117,11 +137,10 @@ export async function vistaTransacciones(id) {
       dato('Forma de pago', t.forma === 'credito' ? 'A crédito' : 'Al contado'),
       dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
       dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
-      h('p', { class: 'ayuda' }, 'Para corregirla, elimínala y regístrala de nuevo.'),
-      h('button', { class: 'btn btn-peligro btn-bloque', type: 'button', onclick: eliminar }, 'Eliminar transacción')));
+      acciones));
   }
 
-  function abrirNueva() {
+  function abrirNueva(editando) {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
       modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
@@ -149,6 +168,22 @@ export async function vistaTransacciones(id) {
       if (st.tipo === 'otro') st.contra = '';
     }
     porDefecto();
+    if (editando) {
+      st.tipo = editando.tipo; st.fecha = editando.fecha;
+      porDefecto();
+      st.tercero = editando.tercero_id || '';
+      if (st.tercero && !terceros.some((x) => x.id === st.tercero)) {
+        terceros.push({ id: st.tercero, razon_social: editando.nombre_tercero || '(inactivo)', ruc: editando.ruc, dv: editando.dv, tipo: 'ambos', activo: false });
+      }
+      st.factura = editando.numero_factura || '';
+      st.descripcion = editando.descripcion || '';
+      st.bruto = String(editando.monto_bruto);
+      st.forma = editando.forma;
+      st.principal = editando.cuenta_principal_id;
+      st.contra = (editando.forma === 'credito' && FACTURAS.includes(editando.tipo)) ? '' : editando.cuenta_contrapartida_id;
+      if (Number(editando.itbms) > 0) { st.modoItbms = 'm'; st.itbmsManual = String(editando.itbms); } else st.modoItbms = '0';
+      st.todas = true;
+    }
 
     function principales() {
       if (st.todas || st.tipo === 'otro') return cuentas;
@@ -259,8 +294,8 @@ export async function vistaTransacciones(id) {
         return;
       }
       boton.disabled = true;
-      const { error } = await db.rpc('registrar_transaccion', {
-        p_empresa: id,
+      const { error } = await db.rpc(editando ? 'editar_transaccion' : 'registrar_transaccion', {
+        ...(editando ? { p_transaccion: editando.id } : { p_empresa: id }),
         p_tipo: st.tipo,
         p_fecha: st.fecha,
         p_tercero_id: st.tercero || null,
@@ -274,7 +309,7 @@ export async function vistaTransacciones(id) {
       });
       boton.disabled = false;
       if (error) { toast(traducirError(error), 'error'); return; }
-      toast('Transacción registrada con su asiento contable.', 'ok');
+      toast(editando ? 'Cambios guardados.' : 'Transacción registrada con su asiento contable.', 'ok');
       cerrar();
       mes = st.fecha.slice(0, 7);
       await cargarMes();
@@ -338,7 +373,7 @@ export async function vistaTransacciones(id) {
       }
 
       totalEl = h('strong', null, '0.00');
-      boton = h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Registrar');
+      boton = h('button', { class: 'btn btn-bloque', type: 'submit' }, editando ? 'Guardar cambios' : 'Registrar');
 
       const formaSel = esFactura() ? h('select', {
         value: st.forma,
@@ -394,7 +429,7 @@ export async function vistaTransacciones(id) {
       actualizarTotales();
     }
 
-    cerrar = modal('Nueva transacción', cuerpo);
+    cerrar = modal(editando ? 'Editar transacción' : 'Nueva transacción', cuerpo);
     pintarForm();
   }
 
@@ -407,7 +442,7 @@ export async function vistaTransacciones(id) {
     resumen,
     lista,
     h('div', { class: 'acciones' },
-      h('button', { class: 'btn', type: 'button', onclick: abrirNueva }, '+ Nueva transacción'))
+      h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))
   ]));
   await cargarMes();
 }

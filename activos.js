@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { barraExportar } from './informes.js';
 import { tablaSimple } from './fiscal.js';
+import { confirmar, barraAcciones, rpcOk } from './acciones.js';
 
 const NUM = (v) => Number(v || 0);
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
@@ -73,18 +74,25 @@ function selectCuentas(cuentas, filtro, valor, vacio) {
     lista.map((c) => h('option', { value: c.id }, `${c.numero} ${c.nombre}`)));
 }
 
-function abrirActivo(id, tipo, cuentas, alGuardar) {
+function abrirActivo(id, tipo, cuentas, alGuardar, existente, fijo) {
+  const e = existente || {};
   const f = {
-    nombre: h('input', { type: 'text', required: true }),
-    fecha: h('input', { type: 'date', required: true, value: hoy() }),
-    valor: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true }),
-    residual: h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', value: '0' }),
-    vida: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true }),
-    inicio: h('input', { type: 'date' }),
-    cActivo: selectCuentas(cuentas, (c) => c.numero.startsWith('1.'), '', 'Cuenta del activo'),
-    cAcum: selectCuentas(cuentas, (c) => c.numero.startsWith('1.'), '', 'Cuenta de depreciación o amortización acumulada'),
-    cGasto: selectCuentas(cuentas, (c) => /^[5-7]\./.test(c.numero), '', 'Usar la cuenta de gasto estándar')
+    nombre: h('input', { type: 'text', required: true, value: e.nombre || '' }),
+    fecha: h('input', { type: 'date', required: true, value: e.fecha_adquisicion || hoy(), disabled: !!fijo }),
+    valor: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true, value: e.valor_inicial !== undefined ? String(e.valor_inicial) : '', disabled: !!fijo }),
+    residual: h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', value: e.valor_residual !== undefined ? String(e.valor_residual) : '0', disabled: !!fijo }),
+    vida: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true, value: e.vida_util_anios !== undefined ? String(e.vida_util_anios) : '', disabled: !!fijo }),
+    inicio: h('input', { type: 'date', value: e.inicio_dep || '', disabled: !!fijo }),
+    cActivo: selectCuentas(cuentas, (c) => c.numero.startsWith('1.'), e.cuenta_activo_id, 'Cuenta del activo'),
+    cAcum: selectCuentas(cuentas, (c) => c.numero.startsWith('1.'), e.cuenta_acumulada_id, 'Cuenta de depreciación o amortización acumulada'),
+    cGasto: selectCuentas(cuentas, (c) => /^[5-7]\./.test(c.numero), e.cuenta_gasto_id, 'Usar la cuenta de gasto estándar')
   };
+  if (existente) {
+    f.cActivo.value = e.cuenta_activo_id || '';
+    f.cAcum.value = e.cuenta_acumulada_id || '';
+    f.cGasto.value = e.cuenta_gasto_id || '';
+    if (fijo) { f.cActivo.disabled = true; f.cAcum.disabled = true; f.cGasto.disabled = true; }
+  }
   let cerrar;
   async function guardar(ev) {
     ev.preventDefault();
@@ -94,17 +102,22 @@ function abrirActivo(id, tipo, cuentas, alGuardar) {
     if (res < 0 || res >= valor) { toast('El valor residual debe ser menor que el valor del activo.', 'error'); return; }
     if (!f.cActivo.value || !f.cAcum.value) { toast('Elige la cuenta del activo y la de depreciación acumulada.', 'error'); return; }
     const ini = f.inicio.value ? f.inicio.value.slice(0, 7) + '-01' : null;
-    const r = await db.from('activos_fijos').insert({
-      empresa_id: id, tipo, nombre: texto(f.nombre.value), fecha_adquisicion: f.fecha.value,
-      inicio_dep: ini, valor_inicial: redondear(valor), valor_residual: redondear(res), vida_util_anios: vida,
-      cuenta_activo_id: f.cActivo.value, cuenta_acumulada_id: f.cAcum.value, cuenta_gasto_id: f.cGasto.value || null
-    });
+    const datos = existente && fijo
+      ? { nombre: texto(f.nombre.value) }
+      : {
+        nombre: texto(f.nombre.value), fecha_adquisicion: f.fecha.value,
+        inicio_dep: ini, valor_inicial: redondear(valor), valor_residual: redondear(res), vida_util_anios: vida,
+        cuenta_activo_id: f.cActivo.value, cuenta_acumulada_id: f.cAcum.value, cuenta_gasto_id: f.cGasto.value || null
+      };
+    const r = existente
+      ? await db.from('activos_fijos').update(datos).eq('id', existente.id)
+      : await db.from('activos_fijos').insert({ empresa_id: id, tipo, ...datos });
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
-    toast('Activo guardado.', 'ok');
+    toast(existente ? 'Cambios guardados.' : 'Activo guardado.', 'ok');
     cerrar();
     alGuardar();
   }
-  cerrar = modal(tipo === 'depreciacion' ? 'Nuevo activo fijo' : 'Nuevo diferido o intangible', h('form', { onsubmit: guardar },
+  cerrar = modal(existente ? 'Editar activo' : (tipo === 'depreciacion' ? 'Nuevo activo fijo' : 'Nuevo diferido o intangible'), h('form', { onsubmit: guardar },
     campo('Nombre', f.nombre),
     campo('Fecha de adquisición', f.fecha),
     campo('Valor de compra', f.valor),
@@ -114,6 +127,7 @@ function abrirActivo(id, tipo, cuentas, alGuardar) {
     campo('Cuenta del activo', f.cActivo),
     campo('Cuenta acumulada', f.cAcum),
     campo('Cuenta de gasto', f.cGasto),
+    fijo ? h('p', { class: 'ayuda' }, 'Solo se puede cambiar el nombre: ya hay depreciación contabilizada o el activo fue dado de baja. Deshaz primero lo contabilizado para cambiar el resto.') : null,
     h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
 }
 
@@ -212,7 +226,34 @@ export async function vistaActivos(id) {
           a.estado === 'En uso'
             ? h('div', { class: 'acciones' },
               h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => abrirBaja(a, est.cuentas, pintar) }, 'Vender o dar de baja'))
-            : null));
+            : h('div', { class: 'acciones' },
+              h('button', {
+                class: 'btn btn-sec btn-peq', type: 'button',
+                onclick: () => confirmar({
+                  titulo: 'Deshacer la baja', mensaje: 'Se borra el asiento de la venta o baja y el activo vuelve a estar en uso. Solo se puede si el mes está abierto.', boton: 'Deshacer baja',
+                  alConfirmar: async () => { await rpcOk(db, 'revertir_baja_activo', { p_activo: a.activo_id }); toast('Baja deshecha.', 'ok'); pintar(); }
+                })
+              }, 'Deshacer baja')),
+          barraAcciones({
+            editar: async () => {
+              const r = await db.from('activos_fijos').select('*').eq('id', a.activo_id).single();
+              if (r.error) { toast(traducirError(r.error), 'error'); return; }
+              abrirActivo(id, est.tipo, est.cuentas, pintar, r.data, NUM(a.registrado_contabilidad) > 0 || a.estado !== 'En uso');
+            },
+            eliminar: () => confirmar({
+              titulo: 'Eliminar registro',
+              mensaje: NUM(a.registrado_contabilidad) > 0 || a.estado !== 'En uso'
+                ? 'Este registro tiene depreciación contabilizada o una baja. Primero usa Deshacer (en Contabilizar un mes) y Deshacer baja.'
+                : 'Se borra el activo y su cuadro de depreciación.',
+              boton: 'Eliminar',
+              alConfirmar: async () => {
+                if (NUM(a.registrado_contabilidad) > 0 || a.estado !== 'En uso') throw new Error('Primero deshaz la depreciación contabilizada y la baja.');
+                const d = await db.from('activos_fijos').delete().eq('id', a.activo_id);
+                if (d.error) throw d.error;
+                toast('Registro eliminado.', 'ok'); pintar();
+              }
+            })
+          })));
         zona.replaceChildren(
           barraExportar({ empresa, obtener: exportar }),
           h('div', { class: 'acciones' },

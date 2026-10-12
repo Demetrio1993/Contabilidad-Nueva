@@ -1,4 +1,5 @@
 // Clientes y proveedores
+import { confirmar } from './acciones.js';
 import { db, h, mostrar, toast, modal, campo, texto, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
 
 const TIPOS = { cliente: 'Cliente', proveedor: 'Proveedor', ambos: 'Cliente y proveedor' };
@@ -60,7 +61,24 @@ export function abrirTercero(empresaId, tercero, tipoSugerido, alGuardar, datosI
     campo('Teléfono', f.telefono),
     campo('Correo', f.correo),
     nuevo ? null : h('label', { class: 'fila-check' }, f.activo, h('span', null, 'Activo')),
-    h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
+    h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
+    nuevo ? null : h('button', {
+      class: 'btn btn-peligro btn-bloque', type: 'button',
+      onclick: () => confirmar({
+        titulo: 'Eliminar cliente o proveedor',
+        mensaje: 'Se borra si no tiene transacciones. Si ya tiene, no se puede borrar: desmarca "Activo" para que deje de aparecer en las listas.',
+        boton: 'Eliminar',
+        alConfirmar: async () => {
+          const d = await db.from('terceros').delete().eq('id', t.id);
+          if (d.error) {
+            throw new Error(d.error.code === '23503' ? 'Tiene transacciones o movimientos: no se puede borrar. Desmarca "Activo".' : d.error.message);
+          }
+          toast('Eliminado.', 'ok');
+          cerrar();
+          alGuardar(null);
+        }
+      })
+    }, 'Eliminar')));
 }
 
 export async function vistaTerceros(id) {

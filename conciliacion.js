@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { barraExportar } from './informes.js';
 import { tablaSimple } from './fiscal.js';
+import { confirmar, barraAcciones } from './acciones.js';
 
 const NUM = (v) => Number(v || 0);
 const E = { detalle: 'normal', total: 'total', control: 'n1', info: 'normal', subtotal: 'n1' };
@@ -41,16 +42,17 @@ function specTransito(rows, corte) {
   };
 }
 
-function abrirNota(id, cuentaId, cuentas, alGuardar) {
+function abrirNota(id, cuentaId, cuentas, alGuardar, existente) {
+  const e = existente || {};
   const f = {
     tipo: h('select', null,
-      h('option', { value: 'nota_credito' }, 'Nota de crédito (el banco te acreditó, ej. intereses)'),
-      h('option', { value: 'nota_debito' }, 'Nota de débito (el banco te cobró, ej. comisión)')),
-    fecha: h('input', { type: 'date', required: true, value: hoy() }),
-    desc: h('input', { type: 'text', placeholder: 'Ej. Comisión bancaria' }),
-    monto: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true }),
+      h('option', { value: 'nota_credito', selected: e.tipo !== 'nota_debito' }, 'Nota de crédito (el banco te acreditó, ej. intereses)'),
+      h('option', { value: 'nota_debito', selected: e.tipo === 'nota_debito' }, 'Nota de débito (el banco te cobró, ej. comisión)')),
+    fecha: h('input', { type: 'date', required: true, value: e.fecha || hoy() }),
+    desc: h('input', { type: 'text', placeholder: 'Ej. Comisión bancaria', value: e.descripcion || '' }),
+    monto: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', required: true, value: e.monto !== undefined ? String(e.monto) : '' }),
     contra: h('select', { required: true }, h('option', { value: '' }, 'Cuenta de contrapartida…'),
-      cuentas.map((c) => h('option', { value: c.id }, `${c.numero} ${c.nombre}`)))
+      cuentas.map((c) => h('option', { value: c.id, selected: c.id === e.cuenta_contrapartida_id }, `${c.numero} ${c.nombre}`)))
   };
   let cerrar;
   async function guardar(ev) {
@@ -58,16 +60,19 @@ function abrirNota(id, cuentaId, cuentas, alGuardar) {
     const m = Number(f.monto.value);
     if (!(m > 0)) { toast('Escribe un monto mayor que cero.', 'error'); return; }
     if (!f.contra.value) { toast('Elige la cuenta de contrapartida.', 'error'); return; }
-    const r = await db.from('partidas_banco').insert({
-      empresa_id: id, cuenta_id: cuentaId, fecha: f.fecha.value, tipo: f.tipo.value,
+    const datos = {
+      fecha: f.fecha.value, tipo: f.tipo.value,
       descripcion: texto(f.desc.value), monto: redondear(m), cuenta_contrapartida_id: f.contra.value
-    });
+    };
+    const r = existente
+      ? await db.from('partidas_banco').update(datos).eq('id', existente.id)
+      : await db.from('partidas_banco').insert({ empresa_id: id, cuenta_id: cuentaId, ...datos });
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
-    toast('Nota guardada. Falta contabilizarla.', 'ok');
+    toast(existente ? 'Cambios guardados.' : 'Nota guardada. Falta contabilizarla.', 'ok');
     cerrar();
     alGuardar();
   }
-  cerrar = modal('Nota del banco', h('form', { onsubmit: guardar },
+  cerrar = modal(existente ? 'Editar nota del banco' : 'Nota del banco', h('form', { onsubmit: guardar },
     campo('Tipo', f.tipo), campo('Fecha', f.fecha), campo('Descripción', f.desc), campo('Monto', f.monto),
     campo('Contrapartida', f.contra, 'Ejemplo: intereses ganados o comisiones bancarias.'),
     h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
@@ -157,24 +162,35 @@ export async function vistaConciliacion(id) {
             h('td', { class: 'num' }, NUM(m.egreso) ? NUM(m.egreso).toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''))))))
         : h('p', { class: 'ayuda' }, 'No hay movimientos de libros en esta cuenta hasta la fecha de corte.');
 
-      const bloqueNotas = (notas.data || []).map((n) => h('div', { class: 'fila-mes-cierre' },
-        h('span', null, `${fechaCorta(n.fecha)} · ${n.tipo === 'nota_credito' ? 'Crédito' : 'Débito'} · ${n.descripcion || ''} · B/. ${NUM(n.monto).toLocaleString('en-US', { minimumFractionDigits: 2 })}`),
-        n.asiento_id
-          ? h('button', {
-            class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
-              const r = await db.rpc('revertir_partida_banco', { p_partida: n.id });
-              if (r.error) { toast(traducirError(r.error), 'error'); return; }
-              toast('Asiento deshecho.', 'ok'); pintar();
+      const bloqueNotas = (notas.data || []).map((n) => h('div', { class: 'tarjeta' },
+        h('p', null, `${fechaCorta(n.fecha)} · ${n.tipo === 'nota_credito' ? 'Crédito' : 'Débito'} · ${n.descripcion || 'Sin descripción'} · B/. ${NUM(n.monto).toLocaleString('en-US', { minimumFractionDigits: 2 })}`),
+        n.asiento_id ? h('p', { class: 'ayuda' }, 'Contabilizada. Para cambiarla, primero deshaz el asiento.') : null,
+        barraAcciones({
+          editar: n.asiento_id ? null : () => abrirNota(id, est.cuenta, est.todas, pintar, n),
+          eliminar: n.asiento_id ? null : () => confirmar({
+            titulo: 'Eliminar nota del banco', mensaje: 'Se borra la nota (todavía no está contabilizada).', boton: 'Eliminar',
+            alConfirmar: async () => {
+              const d = await db.from('partidas_banco').delete().eq('id', n.id);
+              if (d.error) throw d.error;
+              toast('Nota eliminada.', 'ok'); pintar();
             }
-          }, 'Deshacer')
-          : h('button', {
-            class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
-              const r = await db.rpc('contabilizar_partida_banco', { p_partida: n.id, p_fecha: null });
-              if (r.error) { toast(traducirError(r.error), 'error'); return; }
-              toast('Nota contabilizada.', 'ok'); pintar();
-            }
-          }, 'Contabilizar'),
-        h('span')));
+          }),
+          extra: n.asiento_id
+            ? h('button', {
+              class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
+                const r = await db.rpc('revertir_partida_banco', { p_partida: n.id });
+                if (r.error) { toast(traducirError(r.error), 'error'); return; }
+                toast('Asiento deshecho.', 'ok'); pintar();
+              }
+            }, 'Deshacer asiento')
+            : h('button', {
+              class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
+                const r = await db.rpc('contabilizar_partida_banco', { p_partida: n.id, p_fecha: null });
+                if (r.error) { toast(traducirError(r.error), 'error'); return; }
+                toast('Nota contabilizada.', 'ok'); pintar();
+              }
+            }, 'Contabilizar')
+        })));
 
       zona.replaceChildren(...[
         barraExportar({

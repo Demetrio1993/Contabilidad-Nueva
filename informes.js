@@ -5,6 +5,7 @@ import {
   traducirError, cargando, marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { exportarExcel, exportarPdf } from './exportar.js';
+import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 
 const ORIGENES = {
   manual: 'Manual', ajuste: 'Ajuste', apertura: 'Apertura', transaccion: 'Transacción',
@@ -59,14 +60,14 @@ export function barraExportar({ empresa, obtener, etiquetaExcel, etiquetaPdf }) 
 
 /* ------------------------- asiento de ajuste manual ------------------------ */
 
-export function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
-  const fecha = h('input', { type: 'date', value: fechaInicial });
-  const desc = h('input', { type: 'text', placeholder: 'Ej.: Ajuste por gasto acumulado' });
-  const ref = h('input', { type: 'text', placeholder: 'Opcional' });
+export function abrirAjuste(id, cuentas, fechaInicial, alGuardar, existente) {
+  const fecha = h('input', { type: 'date', value: existente ? existente.fecha : fechaInicial });
+  const desc = h('input', { type: 'text', placeholder: 'Ej.: Ajuste por gasto acumulado', value: existente ? existente.descripcion : '' });
+  const ref = h('input', { type: 'text', placeholder: 'Opcional', value: existente ? (existente.referencia || '') : '' });
   const filas = [];
   const caja = h('div');
   const tot = h('p', { class: 'total-neto' });
-  const guardar = h('button', { class: 'btn', type: 'button' }, 'Guardar asiento de ajuste');
+  const guardar = h('button', { class: 'btn', type: 'button' }, existente ? 'Guardar cambios' : 'Guardar asiento de ajuste');
 
   function sumas() {
     let d = 0; let c = 0;
@@ -79,7 +80,7 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
     tot.textContent = `Débitos ${dinero(d)} · Créditos ${dinero(c)}` +
       (dif === 0 ? (d > 0 ? ' · Cuadrado' : '') : ` · Diferencia ${dinero(Math.abs(dif))}`);
   }
-  function agregar() {
+  function agregar(pre) {
     const f = {
       cuenta: h('select', null,
         h('option', { value: '' }, 'Elegir cuenta…'),
@@ -97,10 +98,17 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
           filas.splice(filas.indexOf(f), 1); f.caja.remove(); recalcular();
         }
       }, 'Quitar línea'));
+    if (pre && pre.cuenta_id) {
+      f.cuenta.value = pre.cuenta_id;
+      if (Number(pre.debito) > 0) f.debito.value = String(pre.debito);
+      if (Number(pre.credito) > 0) f.credito.value = String(pre.credito);
+    }
     filas.push(f);
     caja.append(f.caja);
   }
-  agregar(); agregar(); recalcular();
+  if (existente && existente.lineas && existente.lineas.length) existente.lineas.forEach((l) => agregar(l));
+  else { agregar(); agregar(); }
+  recalcular();
 
   guardar.addEventListener('click', async () => {
     const usadas = filas.filter((f) => f.cuenta.value || f.debito.value || f.credito.value);
@@ -115,26 +123,32 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar) {
     const [d, c] = sumas();
     if (d !== c) { toast(`El asiento no cuadra: débitos ${dinero(d)} y créditos ${dinero(c)}.`, 'error'); return; }
     guardar.disabled = true;
-    const { error } = await db.rpc('crear_asiento', {
-      p_empresa: id,
-      p_fecha: fecha.value,
-      p_descripcion: texto(desc.value),
-      p_referencia: texto(ref.value),
-      p_origen: 'ajuste',
-      p_lineas: usadas.map((f) => ({
-        cuenta_id: f.cuenta.value,
-        debito: Number(f.debito.value || 0),
-        credito: Number(f.credito.value || 0)
-      }))
-    });
+    const lineas = usadas.map((f) => ({
+      cuenta_id: f.cuenta.value,
+      debito: Number(f.debito.value || 0),
+      credito: Number(f.credito.value || 0)
+    }));
+    const { error } = existente
+      ? await db.rpc('editar_asiento', {
+        p_asiento: existente.id, p_fecha: fecha.value, p_descripcion: texto(desc.value),
+        p_referencia: texto(ref.value), p_lineas: lineas
+      })
+      : await db.rpc('crear_asiento', {
+        p_empresa: id,
+        p_fecha: fecha.value,
+        p_descripcion: texto(desc.value),
+        p_referencia: texto(ref.value),
+        p_origen: 'ajuste',
+        p_lineas: lineas
+      });
     guardar.disabled = false;
     if (error) { toast(traducirError(error), 'error'); return; }
     cerrar();
-    toast('Asiento de ajuste registrado.', 'ok');
+    toast(existente ? 'Asiento corregido.' : 'Asiento de ajuste registrado.', 'ok');
     alGuardar();
   });
 
-  const cerrar = modal('Asiento de ajuste', h('div', null,
+  const cerrar = modal(existente ? 'Editar asiento' : 'Asiento de ajuste', h('div', null,
     campo('Fecha', fecha),
     campo('Descripción', desc),
     campo('Referencia', ref),
@@ -175,12 +189,56 @@ export async function vistaInformes(id) {
   const archivoDe = (informe) => `${empresa.razon_social}-${informe}-${est.modo === 'anio' ? est.anio : est.mes}`;
 
   /* ---- diario ---- */
+  function accionesAsiento(a, ls) {
+    const manual = ['manual', 'ajuste', 'apertura'].includes(a.origen);
+    const esAnulacion = a.origen === 'ajuste' && String(a.referencia || '').startsWith('ANULA-');
+    if (!manual) {
+      return h('p', { class: 'ayuda' }, a.origen === 'transaccion'
+        ? 'Para corregirlo, ve a Transacciones.'
+        : 'Lo generó otro proceso: deshazlo desde su pantalla (Activos, Inventario, Conciliación o Cierre).');
+    }
+    if (esAnulacion) {
+      return barraAcciones({
+        eliminar: () => confirmar({
+          titulo: 'Eliminar la anulación',
+          mensaje: 'Se borra este asiento y el asiento original vuelve a estar vigente.',
+          boton: 'Eliminar',
+          alConfirmar: async () => { await rpcOk(db, 'eliminar_asiento', { p_asiento: a.id }); toast('Anulación eliminada.', 'ok'); pintar(); }
+        })
+      });
+    }
+    return barraAcciones({
+      editar: a.anulado ? null : () => abrirAjuste(id, cuentas, a.fecha, pintar, {
+        id: a.id, fecha: a.fecha, descripcion: a.descripcion, referencia: a.referencia,
+        lineas: ls.map((l) => ({ cuenta_id: l.cuenta_id, debito: l.debito, credito: l.credito }))
+      }),
+      anular: a.anulado ? null : () => pedirMotivo({
+        titulo: 'Anular asiento',
+        mensaje: 'Se conserva el asiento y se crea otro contrario con la misma fecha. Solo se puede si el mes está abierto.',
+        alConfirmar: async (motivo) => { await rpcOk(db, 'anular_asiento', { p_asiento: a.id, p_motivo: motivo }); toast('Asiento anulado.', 'ok'); pintar(); }
+      }),
+      eliminar: () => confirmar({
+        titulo: 'Eliminar asiento',
+        mensaje: a.anulado ? 'Se borra el asiento y también su anulación.' : 'Se borra el asiento. Solo se puede si el mes está abierto.',
+        boton: 'Eliminar',
+        alConfirmar: async () => { await rpcOk(db, 'eliminar_asiento', { p_asiento: a.id }); toast('Asiento eliminado.', 'ok'); pintar(); }
+      })
+    });
+  }
+
   async function diario() {
     const [d, hasta] = rango();
-    const { data, error } = await db.from('asientos')
-      .select('id, consecutivo, fecha, descripcion, referencia, origen, asiento_lineas(debito, credito, descripcion, cuentas(numero, nombre))')
+    let r = await db.from('asientos')
+      .select('id, consecutivo, fecha, descripcion, referencia, origen, anulado, motivo_anulacion, asiento_lineas(cuenta_id, debito, credito, descripcion, cuentas(numero, nombre))')
       .eq('empresa_id', id).gte('fecha', d).lte('fecha', hasta)
       .order('fecha').order('consecutivo').range(0, 4999);
+    if (r.error && /anulado|motivo_anulacion/.test(r.error.message || '')) {
+      r = await db.from('asientos')
+        .select('id, consecutivo, fecha, descripcion, referencia, origen, asiento_lineas(cuenta_id, debito, credito, descripcion, cuentas(numero, nombre))')
+        .eq('empresa_id', id).gte('fecha', d).lte('fecha', hasta)
+        .order('fecha').order('consecutivo').range(0, 4999);
+    }
+    const { data, error } = r;
     if (error) throw error;
     let td = 0; let tc = 0;
     const filasSpec = [];
@@ -198,17 +256,19 @@ export async function vistaInformes(id) {
           e: i === 0 ? 'normal' : 'normal'
         });
       });
-      return h('div', { class: 'tarjeta' },
+      return h('div', { class: 'tarjeta' + (a.anulado ? ' anulada' : '') },
         h('div', { class: 'trx-linea' },
           h('strong', null, `N.º ${a.consecutivo}`),
           h('span', { class: 'ayuda' }, fechaCorta(a.fecha)),
-          h('span', { class: 'insignia' + (a.origen === 'ajuste' ? ' aviso' : ' gris') }, ORIENTE(a.origen))),
+          h('span', { class: 'insignia' + (a.origen === 'ajuste' ? ' aviso' : ' gris') }, ORIENTE(a.origen)),
+          a.anulado ? h('span', { class: 'insignia aviso' }, 'Anulado') : null),
         h('p', { class: 'trx-nom' }, a.descripcion + (a.referencia ? ` · ${a.referencia}` : '')),
         h('div', { class: 'linea-asiento cab' }, h('span', null, 'Cuenta'), h('span', { class: 'monto' }, 'Débito'), h('span', { class: 'monto' }, 'Crédito')),
         ls.map((l) => h('div', { class: 'linea-asiento' },
           h('span', null, l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` : ''),
           h('span', { class: 'monto' }, nz(l.debito)),
-          h('span', { class: 'monto' }, nz(l.credito)))));
+          h('span', { class: 'monto' }, nz(l.credito)))),
+        accionesAsiento(a, ls));
     });
     filasSpec.push({ c: ['', '', 'Totales', '', redondear(td), redondear(tc)], e: 'total' });
     const nodo = h('div', null,
