@@ -144,7 +144,7 @@ export async function vistaTransacciones(id) {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
       modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
-      lectura: null, nuevoTercero: null
+      lectura: null, nuevoTercero: null, duplicada: null
     };
     const cuerpo = h('div');
     let cerrar;
@@ -156,6 +156,7 @@ export async function vistaTransacciones(id) {
 
     function porDefecto() {
       st.lectura = null;
+      st.duplicada = null;
       st.nuevoTercero = null;
       st.forma = 'contado';
       st.tercero = '';
@@ -222,6 +223,10 @@ export async function vistaTransacciones(id) {
 
     // Pasa lo leído de la factura al formulario; el usuario lo revisa antes de registrar
     function aplicarLectura(d) {
+      if (d.rol) {
+        const nuevo = d.rol === 'emisor' ? 'venta' : (st.tipo === 'venta' ? 'gasto' : st.tipo);
+        if (nuevo !== st.tipo) { st.tipo = nuevo; porDefecto(); }
+      }
       const esVenta = st.tipo === 'venta';
       const otra = esVenta ? d.receptor : d.emisor;
       if (d.fecha) st.fecha = d.fecha;
@@ -252,8 +257,15 @@ export async function vistaTransacciones(id) {
         const c = principales().find((x) => x.numero === d.cuenta_sugerida);
         if (c) st.principal = c.id;
       }
+      if (d.forma === 'credito' && esFactura()) st.forma = 'credito';
       st.lectura = d;
+      st.duplicada = null;
       pintarForm();
+      if (d.cufe && !editando) {
+        db.rpc('cufe_existe', { p_empresa: id, p_cufe: d.cufe }).then((r) => {
+          if (!r.error && r.data && st.lectura === d) { st.duplicada = r.data; pintarForm(); }
+        });
+      }
     }
 
     function bloqueLectura() {
@@ -262,6 +274,7 @@ export async function vistaTransacciones(id) {
       const rolTercero = st.tipo === 'venta' ? 'cliente' : 'proveedor';
       return h('div', { class: 'aviso-lectura' },
         h('strong', null, 'Datos leídos de la factura. Revísalos antes de registrar.'),
+        st.duplicada ? h('p', { class: 'error-texto' }, `Esta factura electrónica ya está registrada: ${st.duplicada}. No se puede registrar dos veces.`) : null,
         d.confianza !== 'alta' ? h('p', null, `Confianza de la lectura: ${d.confianza}.`) : null,
         d.observaciones ? h('p', null, d.observaciones) : null,
         st.nuevoTercero ? h('div', null,
@@ -293,8 +306,9 @@ export async function vistaTransacciones(id) {
         toast('Elige el cliente o proveedor.', 'error');
         return;
       }
+      if (st.duplicada && !editando) { toast('Esta factura electrónica ya está registrada.', 'error'); return; }
       boton.disabled = true;
-      const { error } = await db.rpc(editando ? 'editar_transaccion' : 'registrar_transaccion', {
+      const { data: nuevoId, error } = await db.rpc(editando ? 'editar_transaccion' : 'registrar_transaccion', {
         ...(editando ? { p_transaccion: editando.id } : { p_empresa: id }),
         p_tipo: st.tipo,
         p_fecha: st.fecha,
@@ -309,6 +323,10 @@ export async function vistaTransacciones(id) {
       });
       boton.disabled = false;
       if (error) { toast(traducirError(error), 'error'); return; }
+      if (!editando && st.lectura && st.lectura.cufe && nuevoId) {
+        const c = await db.rpc('asignar_cufe', { p_transaccion: nuevoId, p_cufe: st.lectura.cufe });
+        if (c.error) toast('Se registró, pero no se pudo guardar el código de la factura electrónica: ' + traducirError(c.error), 'error');
+      }
       toast(editando ? 'Cambios guardados.' : 'Transacción registrada con su asiento contable.', 'ok');
       cerrar();
       mes = st.fecha.slice(0, 7);
@@ -403,6 +421,7 @@ export async function vistaTransacciones(id) {
             cuentas: principales().filter((c) => c.acepta_movimientos !== false).slice(0, 150)
               .map((c) => `${c.numero} ${c.nombre}`)
           }),
+          obtenerEmpresa: () => ({ ruc: empresa.ruc, dv: empresa.dv }),
           alLeer: aplicarLectura
         }) : null,
         bloqueLectura(),

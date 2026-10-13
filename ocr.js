@@ -1,6 +1,7 @@
 // Lectura de facturas con IA: foto, galería o PDF -> datos para el formulario
 import { db, h, toast } from './lib.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { leerFacturaXml } from './facturaxml.js';
 
 const MAX_LADO = 1600;       // las fotos se reducen para enviarlas más rápido
 const MAX_PDF = 6 * 1024 * 1024;
@@ -140,7 +141,7 @@ export async function leerFactura(archivo, contexto) {
 }
 
 // Panel con los botones "Tomar foto" y "Elegir imagen o PDF"
-export function panelEscaneo({ obtenerContexto, alLeer }) {
+export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
   const estado = h('p', { class: 'ayuda' });
   const botones = [];
 
@@ -148,10 +149,13 @@ export function panelEscaneo({ obtenerContexto, alLeer }) {
     const archivo = ev.target.files && ev.target.files[0];
     ev.target.value = '';
     if (!archivo) return;
-    estado.textContent = 'Leyendo la factura… puede tardar unos segundos.';
+    const esXml = /\.xml$/i.test(archivo.name || '') || /xml/i.test(archivo.type || '');
+    estado.textContent = esXml ? 'Leyendo el XML…' : 'Leyendo la factura… puede tardar unos segundos.';
     botones.forEach((b) => { b.disabled = true; });
     try {
-      const lectura = await leerFactura(archivo, obtenerContexto());
+      const lectura = esXml
+        ? leerFacturaXml(await archivo.text(), obtenerEmpresa ? obtenerEmpresa() : null)
+        : await leerFactura(archivo, obtenerContexto());
       estado.textContent = '';
       alLeer(lectura);
     } catch (e) {
@@ -164,13 +168,16 @@ export function panelEscaneo({ obtenerContexto, alLeer }) {
 
   const camara = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: manejar });
   const galeria = h('input', { type: 'file', accept: 'image/*,application/pdf', hidden: true, onchange: manejar });
+  const xml = h('input', { type: 'file', accept: '.xml,text/xml,application/xml', hidden: true, onchange: manejar });
+  const b3 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => xml.click() }, 'Importar XML (factura electrónica)');
   const b1 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => camara.click() }, 'Tomar foto');
   const b2 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => galeria.click() }, 'Elegir imagen o PDF');
-  botones.push(b1, b2);
+  botones.push(b1, b2, b3);
 
   return h('div', { class: 'grupo' },
     h('h3', null, 'Leer factura con IA'),
     h('div', { class: 'acciones' }, b1, b2),
-    camara, galeria, estado,
-    h('p', { class: 'ayuda' }, 'La lectura puede equivocarse: revisa los datos antes de registrar.'));
+    h('div', { class: 'acciones' }, b3),
+    camara, galeria, xml, estado,
+    h('p', { class: 'ayuda' }, 'El XML de la DGI se lee sin IA y es exacto. La foto o el PDF los lee la IA y puede equivocarse: revisa siempre antes de registrar.'));
 }

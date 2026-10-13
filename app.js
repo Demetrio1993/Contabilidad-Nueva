@@ -15,6 +15,8 @@ import { vistaConciliacion } from './conciliacion.js';
 import { vistaInventario } from './inventario.js';
 import { vistaAnalisis } from './analisis.js';
 import { vistaPanel } from './panel.js';
+import { vistaBitacora } from './bitacora.js';
+import { seccionUsuarios, seccionEliminar } from './acceso.js';
 
 /* ============================== acceso =============================== */
 
@@ -197,10 +199,14 @@ function vistaEmpresaNueva() {
 async function vistaEmpresaDatos(id) {
   mostrar(marco(cargando()));
   const e = await cargarEmpresa(id);
-  mostrar(marcoEmpresa(e, 'datos', formularioEmpresa(e, () => {
-    toast('Datos guardados.', 'ok');
-    irA(`#/empresa/${id}/datos`);
-  })));
+  mostrar(marcoEmpresa(e, 'datos', [
+    formularioEmpresa(e, () => {
+      toast('Datos guardados.', 'ok');
+      irA(`#/empresa/${id}/datos`);
+    }),
+    seccionUsuarios(e),
+    seccionEliminar(e)
+  ]));
 }
 
 /* ============================== catálogo ============================= */
@@ -458,6 +464,7 @@ async function render() {
       else if (p[2] === 'inventario') await vistaInventario(id);
       else if (p[2] === 'analisis') await vistaAnalisis(id);
       else if (p[2] === 'panel') await vistaPanel(id);
+      else if (p[2] === 'bitacora') await vistaBitacora(id);
       else if (p[2] === 'terceros') await vistaTerceros(id);
       else if (p[2] === 'datos') await vistaEmpresaDatos(id);
       else await vistaTransacciones(id);
