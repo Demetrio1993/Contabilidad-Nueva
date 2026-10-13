@@ -13,6 +13,8 @@ import { vistaCartera } from './cartera.js';
 import { vistaActivos } from './activos.js';
 import { vistaConciliacion } from './conciliacion.js';
 import { vistaInventario } from './inventario.js';
+import { vistaAnalisis } from './analisis.js';
+import { vistaPanel } from './panel.js';
 
 /* ============================== acceso =============================== */
 
@@ -454,6 +456,8 @@ async function render() {
       else if (p[2] === 'activos') await vistaActivos(id);
       else if (p[2] === 'conciliacion') await vistaConciliacion(id);
       else if (p[2] === 'inventario') await vistaInventario(id);
+      else if (p[2] === 'analisis') await vistaAnalisis(id);
+      else if (p[2] === 'panel') await vistaPanel(id);
       else if (p[2] === 'terceros') await vistaTerceros(id);
       else if (p[2] === 'datos') await vistaEmpresaDatos(id);
       else await vistaTransacciones(id);
