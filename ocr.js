@@ -62,6 +62,7 @@ export function normalizarLectura(d) {
     emisor: parte(d.emisor),
     receptor: parte(d.receptor),
     numero_factura: txt(d.numero_factura),
+    cufe: txt(d.cufe),
     fecha: fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null,
     subtotal: num(d.subtotal),
     itbms: num(d.itbms) ?? 0,
@@ -167,9 +168,9 @@ export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
   }
 
   const camara = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: manejar });
-  const galeria = h('input', { type: 'file', accept: 'image/*,application/pdf', hidden: true, onchange: manejar });
-  const xml = h('input', { type: 'file', accept: '.xml,text/xml,application/xml', hidden: true, onchange: manejar });
-  const b3 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => xml.click() }, 'Importar XML (factura electrónica)');
+  const galeria = h('input', { type: 'file', accept: 'image/*,application/pdf,.xml,text/xml,application/xml', hidden: true, onchange: manejar });
+  const xml = h('input', { type: 'file', hidden: true, onchange: manejar });
+  const b3 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => xml.click() }, 'Importar factura electrónica (XML o PDF)');
   const b1 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => camara.click() }, 'Tomar foto');
   const b2 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => galeria.click() }, 'Elegir imagen o PDF');
   botones.push(b1, b2, b3);
@@ -179,5 +180,5 @@ export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
     h('div', { class: 'acciones' }, b1, b2),
     h('div', { class: 'acciones' }, b3),
     camara, galeria, xml, estado,
-    h('p', { class: 'ayuda' }, 'El XML de la DGI se lee sin IA y es exacto. La foto o el PDF los lee la IA y puede equivocarse: revisa siempre antes de registrar.'));
+    h('p', { class: 'ayuda' }, 'El XML de la DGI se lee sin IA y es exacto; si tienes el XML, úsalo. El PDF o la foto los lee la IA y puede equivocarse: revisa siempre antes de registrar.'));
 }
