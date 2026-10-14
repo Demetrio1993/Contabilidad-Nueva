@@ -8,8 +8,8 @@ if (!window.supabase) {
 }
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-export const estado = { email: '', recuperando: false };
-export const VERSION = '17 · factura electrónica, bitácora y usuarios';
+export const estado = { email: '', recuperando: false, roles: {} };
+export const VERSION = '19 · auxiliar corrige lo suyo';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -114,6 +114,21 @@ export function marco(...contenido) {
     h('footer', { class: 'pie' }, 'Versión ' + VERSION));
 }
 
+// El auxiliar solo ve Transacciones (y Clientes y prov. si el administrador se lo habilitó)
+export function pestanaPermitida(rol, permisos, clave) {
+  if (rol !== 'auxiliar') return true;
+  return clave === 'transacciones' || clave === 'terceros';
+}
+
+// Rol de la persona en la empresa (se guarda para no consultarlo en cada pantalla)
+export async function cargarRol(id) {
+  if (estado.roles[id]) return estado.roles[id];
+  const r = await db.rpc('mi_rol', { p_empresa: id });
+  const fila = !r.error && Array.isArray(r.data) ? r.data[0] : null;
+  estado.roles[id] = { rol: fila ? fila.rol : null, permisos: fila ? (fila.permisos || []) : [] };
+  return estado.roles[id];
+}
+
 export function marcoEmpresa(empresa, pestana, contenido) {
   const pestanas = [
     ['transacciones', 'Transacciones'],
@@ -132,10 +147,12 @@ export function marcoEmpresa(empresa, pestana, contenido) {
     ['catalogo', 'Catálogo'],
     ['datos', 'Datos']
   ];
+  const info = empresa.rol !== undefined ? { rol: empresa.rol, permisos: empresa.permisos || [] } : (estado.roles[empresa.id] || {});
+  const visibles = pestanas.filter(([clave]) => pestanaPermitida(info.rol, info.permisos, clave));
   return marco(
     h('a', { class: 'volver', href: '#/empresas' }, '← Empresas'),
     h('h1', { class: 'titulo' }, empresa.razon_social),
-    h('nav', { class: 'pestanas' }, pestanas.map(([clave, nombre]) =>
+    h('nav', { class: 'pestanas' }, visibles.map(([clave, nombre]) =>
       h('a', { class: 'pestana' + (clave === pestana ? ' activa' : ''), href: `#/empresa/${empresa.id}/${clave}` }, nombre))),
     contenido);
 }
@@ -167,6 +184,9 @@ export function redondear(n) {
 export async function cargarEmpresa(id) {
   const { data, error } = await db.from('empresas').select('*').eq('id', id).single();
   if (error) throw error;
+  const r = await cargarRol(id);
+  data.rol = r.rol;
+  data.permisos = r.permisos;
   return data;
 }
 

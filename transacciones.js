@@ -1,5 +1,5 @@
 // Libro de transacciones: ventas, compras, costos, gastos, cobros, pagos y otros
-import { db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
+import { db, estado, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
 import { abrirTercero } from './terceros.js';
 import { panelEscaneo } from './ocr.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
@@ -47,6 +47,12 @@ export async function vistaTransacciones(id) {
   const clave = Object.fromEntries(rk.data.map((k) => [k.clave, k.cuenta_id]));
   const terceros = rt.data;
 
+  const soloRegistra = empresa.rol === 'auxiliar';
+  const permisos = empresa.permisos || [];
+  const veTodo = !soloRegistra || permisos.includes('ver_transacciones');
+  const puedeTerceros = true;
+  const miId = estado.userId || null;
+
   let mes = mesActual();
   let filas = [];
   const resumen = h('div', { class: 'resumen' });
@@ -58,7 +64,7 @@ export async function vistaTransacciones(id) {
     const consulta = (cols) => db.from('transacciones').select(cols)
       .eq('empresa_id', id).gte('fecha', d).lt('fecha', s)
       .order('fecha').order('creado_en');
-    const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id';
+    const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id, creado_por';
     let r = await consulta(base + ', anulada, motivo_anulacion');
     if (r.error) r = await consulta(base); // si aún no se ejecutó el archivo 53
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
@@ -102,7 +108,8 @@ export async function vistaTransacciones(id) {
     let cerrar;
     const dato = (etq, val) => val ? h('p', null, h('strong', null, etq + ': '), val) : null;
     const recargar = async () => { cerrar(); await cargarMes(); };
-    const acciones = barraAcciones({
+    const puedeCorregir = !soloRegistra || (miId && t.creado_por === miId);
+    const acciones = !puedeCorregir ? null : barraAcciones({
       editar: t.anulada ? null : () => { cerrar(); abrirNueva(t); },
       anular: t.anulada ? null : () => pedirMotivo({
         titulo: 'Anular transacción',
@@ -277,7 +284,8 @@ export async function vistaTransacciones(id) {
         st.duplicada ? h('p', { class: 'error-texto' }, `Esta factura electrónica ya está registrada: ${st.duplicada}. No se puede registrar dos veces.`) : null,
         d.confianza !== 'alta' ? h('p', null, `Confianza de la lectura: ${d.confianza}.`) : null,
         d.observaciones ? h('p', null, d.observaciones) : null,
-        st.nuevoTercero ? h('div', null,
+        st.nuevoTercero && !puedeTerceros ? h('p', { class: 'ayuda' }, `${st.nuevoTercero.nombre || 'Este contacto'} no está en la lista. Pídele al administrador que lo agregue, o registra sin contacto.`) : null,
+        st.nuevoTercero && puedeTerceros ? h('div', null,
           h('p', null, `No encontré a ${st.nuevoTercero.nombre || 'este contacto'}${st.nuevoTercero.ruc ? ' (RUC ' + st.nuevoTercero.ruc + ')' : ''} entre tus clientes y proveedores.`),
           h('button', {
             class: 'btn btn-peq', type: 'button',
@@ -403,7 +411,7 @@ export async function vistaTransacciones(id) {
           h('select', { value: st.tercero, onchange: (e) => { st.tercero = e.target.value; } },
             h('option', { value: '' }, '(sin registrar)'),
             lt.map((t) => h('option', { value: t.id }, `${t.razon_social}${t.ruc ? ' · ' + t.ruc : ''}`)))),
-        h('button', {
+        !puedeTerceros ? null : h('button', {
           class: 'enlace', type: 'button',
           onclick: () => abrirTercero(id, null, ['venta', 'cobro_cliente'].includes(st.tipo) ? 'cliente' : 'proveedor', (fila) => {
             terceros.push(fila);
@@ -457,6 +465,7 @@ export async function vistaTransacciones(id) {
   const siguiente = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, 1); cargarMes(); } }, '›');
 
   mostrar(marcoEmpresa(empresa, 'transacciones', [
+    soloRegistra ? h('p', { class: 'ayuda' }, veTodo ? 'Con tu perfil de auxiliar ves todas las transacciones, pero solo puedes corregir las que tú registraste. Los totales son de lo que ves.' : 'Con tu perfil de auxiliar ves y corriges las transacciones que tú registras. Los totales son de las tuyas.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
     lista,

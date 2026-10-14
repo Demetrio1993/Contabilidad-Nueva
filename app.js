@@ -1,7 +1,7 @@
 // Contabilidad-Nueva · acceso, empresas, catálogo de cuentas y enrutador
 import {
   db, estado, h, toast, modal, mostrar, irA, texto, traducirError, campo, cargando,
-  errorVista, marco, marcoEmpresa, cargarEmpresa
+  errorVista, marco, marcoEmpresa, cargarEmpresa, cargarRol, pestanaPermitida
 } from './lib.js';
 import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
@@ -446,6 +446,7 @@ async function render() {
     const sesion = data.session;
     if (!sesion) { estado.email = ''; mostrar(vistaLogin()); return; }
     estado.email = sesion.user.email || '';
+    estado.userId = sesion.user.id || null;
     if (estado.recuperando) { mostrar(vistaNuevaClave()); return; }
 
     const p = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -453,6 +454,8 @@ async function render() {
     if (p[0] === 'empresa-nueva') { vistaEmpresaNueva(); return; }
     if (p[0] === 'empresa' && p[1]) {
       const id = p[1];
+      const mi = await cargarRol(id);
+      if (!pestanaPermitida(mi.rol, mi.permisos, p[2] || 'transacciones')) { irA(`#/empresa/${id}/transacciones`); return; }
       if (p[2] === 'catalogo') await vistaCatalogo(id);
       else if (p[2] === 'informes') await vistaInformes(id);
       else if (p[2] === 'estados') await vistaEstados(id);

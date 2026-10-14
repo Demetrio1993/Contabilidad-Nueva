@@ -1,6 +1,6 @@
 // Clientes y proveedores
 import { confirmar } from './acciones.js';
-import { db, h, mostrar, toast, modal, campo, texto, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
+import { db, estado, h, mostrar, toast, modal, campo, texto, traducirError, cargando, marco, marcoEmpresa, cargarEmpresa } from './lib.js';
 
 const TIPOS = { cliente: 'Cliente', proveedor: 'Proveedor', ambos: 'Cliente y proveedor' };
 
@@ -62,7 +62,7 @@ export function abrirTercero(empresaId, tercero, tipoSugerido, alGuardar, datosI
     campo('Correo', f.correo),
     nuevo ? null : h('label', { class: 'fila-check' }, f.activo, h('span', null, 'Activo')),
     h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
-    nuevo ? null : h('button', {
+    nuevo || (estado.roles[empresaId] && estado.roles[empresaId].rol === 'auxiliar') ? null : h('button', {
       class: 'btn btn-peligro btn-bloque', type: 'button',
       onclick: () => confirmar({
         titulo: 'Eliminar cliente o proveedor',

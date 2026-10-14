@@ -5,7 +5,12 @@ import { confirmar } from './acciones.js';
 const ROLES = {
   admin: 'Administrador (todo, incluye usuarios y eliminar la empresa)',
   contador: 'Contador (registra y corrige)',
-  lector: 'Lector (solo consulta)'
+  lector: 'Lector (solo consulta)',
+  auxiliar: 'Auxiliar (registra y corrige lo suyo, crea clientes y proveedores)'
+};
+
+const PERMISOS_AUX = {
+  ver_transacciones: 'Puede ver todas las transacciones (solo lectura de las ajenas)'
 };
 
 export function seccionUsuarios(empresa) {
@@ -24,7 +29,12 @@ export function seccionUsuarios(empresa) {
       h('div', { class: 'lista-cuentas' }, lista.map((u) => h('div', { class: 'trx' },
         h('div', { class: 'trx-nom' }, u.correo),
         h('div', { class: 'trx-montos' },
-          h('span', { class: 'ayuda' }, ROLES[u.rol] ? ROLES[u.rol].split(' (')[0] : u.rol),
+          h('span', { class: 'ayuda' }, (ROLES[u.rol] ? ROLES[u.rol].split(' (')[0] : u.rol) +
+            (u.rol === 'auxiliar' && (u.permisos || []).length ? ' + ' + u.permisos.map((p) => (PERMISOS_AUX[p] || p).toLowerCase().replace(/^puede /, '')).join(' y ') : '')),
+          u.rol === 'auxiliar' ? h('button', {
+            class: 'btn btn-sec btn-peq', type: 'button',
+            onclick: () => { correoRef.value = u.correo; rolRef.value = 'auxiliar'; marcarPermisos(u.permisos || []); mostrarPermisos(); correoRef.scrollIntoView && correoRef.scrollIntoView(); }
+          }, 'Permisos') : null,
           h('button', {
             class: 'btn btn-sec btn-peq', type: 'button',
             onclick: () => confirmar({
@@ -42,10 +52,23 @@ export function seccionUsuarios(empresa) {
       formularioAgregar());
   }
 
+  let correoRef; let rolRef; let marcarPermisos = () => {}; let mostrarPermisos = () => {};
+
   function formularioAgregar() {
     const correo = h('input', { type: 'email', placeholder: 'correo@ejemplo.com', autocomplete: 'off' });
-    const rol = h('select', { value: 'contador' }, Object.entries(ROLES).map(([k, v]) =>
+    const rol = h('select', { value: 'contador', onchange: () => mostrarPermisos() }, Object.entries(ROLES).map(([k, v]) =>
       h('option', { value: k }, v)));
+    const cajas = Object.entries(PERMISOS_AUX).map(([k, texto]) => ({
+      k, caja: h('input', { type: 'checkbox' }), texto
+    }));
+    const bloquePermisos = h('div', { class: 'grupo' },
+      h('p', { class: 'ayuda' }, 'El auxiliar registra, edita, anula y elimina lo que él mismo registró, crea clientes y proveedores y ve los totales de sus transacciones. Puedes habilitarle, además:'),
+      cajas.map((c) => h('label', { class: 'fila-check' }, c.caja, h('span', null, c.texto))),
+      h('p', { class: 'ayuda' }, 'Para darle más acceso (informes, estados, etc.) cámbiale el rol a Lector o Contador.'));
+    correoRef = correo; rolRef = rol;
+    mostrarPermisos = () => { bloquePermisos.style.display = rol.value === 'auxiliar' ? '' : 'none'; };
+    marcarPermisos = (lista) => { cajas.forEach((c) => { c.caja.checked = lista.includes(c.k); }); };
+    mostrarPermisos();
     const boton = h('button', { class: 'btn', type: 'submit' }, 'Agregar o cambiar rol');
     return h('form', {
       onsubmit: async (ev) => {
@@ -53,7 +76,8 @@ export function seccionUsuarios(empresa) {
         if (!correo.value.trim()) { toast('Escribe el correo.', 'error'); return; }
         boton.disabled = true;
         const r = await db.rpc('agregar_usuario_empresa', {
-          p_empresa: empresa.id, p_correo: correo.value.trim(), p_rol: rol.value
+          p_empresa: empresa.id, p_correo: correo.value.trim(), p_rol: rol.value,
+          p_permisos: rol.value === 'auxiliar' ? cajas.filter((c) => c.caja.checked).map((c) => c.k) : []
         });
         boton.disabled = false;
         if (r.error) { toast(traducirError(r.error), 'error'); return; }
@@ -64,6 +88,7 @@ export function seccionUsuarios(empresa) {
     },
     campo('Correo del usuario', correo, 'Debe haber creado su cuenta en la app y confirmado su correo.'),
     campo('Rol', rol),
+    bloquePermisos,
     boton);
   }
 
