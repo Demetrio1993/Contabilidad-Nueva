@@ -229,7 +229,25 @@ export async function vistaTransacciones(id) {
     }
 
     // Pasa lo leído de la factura al formulario; el usuario lo revisa antes de registrar
+    // Averigua si una de las partes de la factura es la propia empresa (por RUC o por nombre)
+    const normR = (v) => String(v || '').replace(/[\s.\-]/g, '').toUpperCase();
+    const normN = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    function esLaEmpresa(p) {
+      if (!p) return false;
+      if (empresa.ruc && p.ruc && normR(empresa.ruc) === normR(p.ruc)) return true;
+      const a = normN(empresa.razon_social), b = normN(p.nombre);
+      return a.length >= 6 && b.length >= 6 && (a === b || a.includes(b) || b.includes(a));
+    }
+
     function aplicarLectura(d) {
+      let avisoRol = '';
+      if (!d.rol) {
+        const eE = esLaEmpresa(d.emisor), eR = esLaEmpresa(d.receptor);
+        if (eE && !eR) d.rol = 'emisor';
+        else if (eR && !eE) d.rol = 'receptor';
+      }
+      if (d.rol === 'emisor') avisoRol = 'Tu empresa es la que emitió esta factura: se registra como venta y se toman los datos del cliente.';
       if (d.rol) {
         const nuevo = d.rol === 'emisor' ? 'venta' : (st.tipo === 'venta' ? 'gasto' : st.tipo);
         if (nuevo !== st.tipo) { st.tipo = nuevo; porDefecto(); }
@@ -268,6 +286,7 @@ export async function vistaTransacciones(id) {
       st.lectura = d;
       st.duplicada = null;
       pintarForm();
+      if (avisoRol) toast(avisoRol, 'info');
       if (d.cufe && !editando) {
         db.rpc('cufe_existe', { p_empresa: id, p_cufe: d.cufe }).then((r) => {
           if (!r.error && r.data && st.lectura === d) { st.duplicada = r.data; pintarForm(); }
@@ -429,7 +448,7 @@ export async function vistaTransacciones(id) {
             cuentas: principales().filter((c) => c.acepta_movimientos !== false).slice(0, 150)
               .map((c) => `${c.numero} ${c.nombre}`)
           }),
-          obtenerEmpresa: () => ({ ruc: empresa.ruc, dv: empresa.dv }),
+          obtenerEmpresa: () => ({ ruc: empresa.ruc, dv: empresa.dv, razon_social: empresa.razon_social }),
           alLeer: aplicarLectura
         }) : null,
         bloqueLectura(),
