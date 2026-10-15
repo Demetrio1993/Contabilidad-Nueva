@@ -68,11 +68,12 @@ function numero(v) {
 const norm = (v) => String(v || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 
 function persona(grupo, grupoRuc, nombreTag) {
-  if (!grupo) return { nombre: null, ruc: null, dv: null };
+  if (!grupo) return { nombre: null, ruc: null, dv: null, direccion: null };
   return {
     nombre: valor(grupo, nombreTag),
     ruc: valor(buscar(grupo, grupoRuc), 'dRuc'),
-    dv: valor(buscar(grupo, grupoRuc), 'dDV')
+    dv: valor(buscar(grupo, grupoRuc), 'dDV'),
+    direccion: valor(grupo, 'dDirecEm') || valor(grupo, 'dDirecRec') || null
   };
 }
 

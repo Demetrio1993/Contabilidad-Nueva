@@ -53,7 +53,7 @@ const txt = (v) => {
   const s = v === null || v === undefined ? '' : String(v).trim();
   return s === '' || s.toLowerCase() === 'null' ? null : s;
 };
-const parte = (p) => ({ nombre: txt(p && p.nombre), ruc: txt(p && p.ruc), dv: txt(p && p.dv) });
+const parte = (p) => ({ nombre: txt(p && p.nombre), ruc: txt(p && p.ruc), dv: txt(p && p.dv), direccion: txt(p && p.direccion) });
 
 // Deja los datos en un formato seguro y conocido
 export function normalizarLectura(d) {

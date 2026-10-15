@@ -241,19 +241,19 @@ export async function vistaTransacciones(id) {
     }
 
     function aplicarLectura(d) {
+      // La parte que se captura la decide el tipo de transacción elegido:
+      //  - venta y cobro a cliente: el CLIENTE de la factura (receptor)
+      //  - gasto, compra de mercancía, costo y pago a proveedor: el EMISOR
+      //  - otro movimiento: la otra parte distinta de la propia empresa
       let avisoRol = '';
-      if (!d.rol) {
-        const eE = esLaEmpresa(d.emisor), eR = esLaEmpresa(d.receptor);
-        if (eE && !eR) d.rol = 'emisor';
-        else if (eR && !eE) d.rol = 'receptor';
-      }
-      if (d.rol === 'emisor') avisoRol = 'Tu empresa es la que emitió esta factura: se registra como venta y se toman los datos del cliente.';
-      if (d.rol) {
-        const nuevo = d.rol === 'emisor' ? 'venta' : (st.tipo === 'venta' ? 'gasto' : st.tipo);
-        if (nuevo !== st.tipo) { st.tipo = nuevo; porDefecto(); }
-      }
-      const esVenta = st.tipo === 'venta';
-      const otra = esVenta ? d.receptor : d.emisor;
+      const eE = esLaEmpresa(d.emisor), eR = esLaEmpresa(d.receptor);
+      let usarReceptor;
+      if (['venta', 'cobro_cliente'].includes(st.tipo)) usarReceptor = true;
+      else if (st.tipo === 'otro') usarReceptor = eE && !eR;
+      else usarReceptor = false;
+      const otra = usarReceptor ? d.receptor : d.emisor;
+      if (usarReceptor && eR && !eE) avisoRol = 'Ojo: según la factura, tu empresa es el cliente (receptor). Si es una compra o un gasto, cambia el tipo de transacción y vuelve a leer la factura.';
+      if (!usarReceptor && eE && !eR && st.tipo !== 'otro') avisoRol = 'Ojo: según la factura, tu empresa es la que emitió. Si es una venta o un cobro, cambia el tipo de transacción y vuelve a leer la factura.';
       if (d.fecha) st.fecha = d.fecha;
       if (d.numero_factura) st.factura = d.numero_factura;
       if (d.descripcion) st.descripcion = d.descripcion;
@@ -273,7 +273,7 @@ export async function vistaTransacciones(id) {
       st.nuevoTercero = null;
       if (otra && (otra.ruc || otra.nombre)) {
         const norm = (v) => String(v || '').replace(/[\s.]/g, '').toUpperCase();
-        const hallado = tercerosVisibles().find((t) => t.ruc && otra.ruc && norm(t.ruc) === norm(otra.ruc) &&
+        const hallado = (st.tipo === 'otro' ? terceros : tercerosVisibles()).find((t) => t.ruc && otra.ruc && norm(t.ruc) === norm(otra.ruc) &&
           (!t.dv || !otra.dv || norm(t.dv) === norm(otra.dv)));
         if (hallado) st.tercero = hallado.id;
         else st.nuevoTercero = otra;
@@ -297,7 +297,7 @@ export async function vistaTransacciones(id) {
     function bloqueLectura() {
       if (!st.lectura) return null;
       const d = st.lectura;
-      const rolTercero = st.tipo === 'venta' ? 'cliente' : 'proveedor';
+      const rolTercero = ['venta', 'cobro_cliente'].includes(st.tipo) ? 'cliente' : 'proveedor';
       return h('div', { class: 'aviso-lectura' },
         h('strong', null, 'Datos leídos de la factura. Revísalos antes de registrar.'),
         st.duplicada ? h('p', { class: 'error-texto' }, `Esta factura electrónica ya está registrada: ${st.duplicada}. No se puede registrar dos veces.`) : null,
@@ -313,7 +313,7 @@ export async function vistaTransacciones(id) {
               st.tercero = fila.id;
               st.nuevoTercero = null;
               pintarForm();
-            }, { razon_social: st.nuevoTercero.nombre, ruc: st.nuevoTercero.ruc, dv: st.nuevoTercero.dv })
+            }, { razon_social: st.nuevoTercero.nombre, ruc: st.nuevoTercero.ruc, dv: st.nuevoTercero.dv, direccion: st.nuevoTercero.direccion })
           }, 'Crear con los datos de la factura')) : null,
         d.items && d.items.length ? h('p', { class: 'ayuda' }, `La factura tiene ${d.items.length} renglón(es) de detalle.`) : null);
     }
@@ -443,7 +443,7 @@ export async function vistaTransacciones(id) {
         campo('Tipo de transacción', tipoSel),
         esFactura() ? panelEscaneo({
           obtenerContexto: () => ({
-            rol: st.tipo === 'venta' ? 'cliente' : 'proveedor',
+            rol: ['venta', 'cobro_cliente'].includes(st.tipo) ? 'cliente' : 'proveedor',
             contribuyente: !!empresa.contribuyente_itbms,
             cuentas: principales().filter((c) => c.acepta_movimientos !== false).slice(0, 150)
               .map((c) => `${c.numero} ${c.nombre}`)
