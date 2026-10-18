@@ -49,7 +49,7 @@ export async function vistaTransacciones(id) {
 
   const soloRegistra = empresa.rol === 'auxiliar';
   const permisos = empresa.permisos || [];
-  const veTodo = !soloRegistra || permisos.includes('ver_transacciones');
+  const veTodo = true; // el auxiliar ve todas las transacciones de la empresa
   const puedeTerceros = true;
   const miId = estado.userId || null;
 
@@ -484,7 +484,7 @@ export async function vistaTransacciones(id) {
   const siguiente = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, 1); cargarMes(); } }, '›');
 
   mostrar(marcoEmpresa(empresa, 'transacciones', [
-    soloRegistra ? h('p', { class: 'ayuda' }, veTodo ? 'Con tu perfil de auxiliar ves todas las transacciones, pero solo puedes corregir las que tú registraste. Los totales son de lo que ves.' : 'Con tu perfil de auxiliar ves y corriges las transacciones que tú registras. Los totales son de las tuyas.') : null,
+    soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
     lista,

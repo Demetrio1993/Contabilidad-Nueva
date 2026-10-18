@@ -6,12 +6,11 @@ const ROLES = {
   admin: 'Administrador (todo, incluye usuarios y eliminar la empresa)',
   contador: 'Contador (registra y corrige)',
   lector: 'Lector (solo consulta)',
-  auxiliar: 'Auxiliar (registra y corrige lo suyo, crea clientes y proveedores)'
+  auxiliar: 'Auxiliar (ve todas las transacciones, registra y corrige lo suyo)'
 };
 
-const PERMISOS_AUX = {
-  ver_transacciones: 'Puede ver todas las transacciones (solo lectura de las ajenas)'
-};
+// El auxiliar ya ve todas las transacciones de la empresa; no hay permisos extra que marcar
+const PERMISOS_AUX = {};
 
 export function seccionUsuarios(empresa) {
   const caja = h('div', null, h('p', { class: 'ayuda' }, 'Cargando usuarios…'));
@@ -62,7 +61,7 @@ export function seccionUsuarios(empresa) {
       k, caja: h('input', { type: 'checkbox' }), texto
     }));
     const bloquePermisos = h('div', { class: 'grupo' },
-      h('p', { class: 'ayuda' }, 'El auxiliar registra, edita, anula y elimina lo que él mismo registró, crea clientes y proveedores y ve los totales de sus transacciones. Puedes habilitarle, además:'),
+      h('p', { class: 'ayuda' }, 'El auxiliar ve todas las transacciones y sus totales del mes, registra, crea clientes y proveedores, y edita, anula y elimina solo lo que él mismo registró.'),
       cajas.map((c) => h('label', { class: 'fila-check' }, c.caja, h('span', null, c.texto))),
       h('p', { class: 'ayuda' }, 'Para darle más acceso (informes, estados, etc.) cámbiale el rol a Lector o Contador.'));
     correoRef = correo; rolRef = rol;
