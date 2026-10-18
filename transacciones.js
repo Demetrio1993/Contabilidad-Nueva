@@ -55,17 +55,28 @@ export async function vistaTransacciones(id) {
 
   let mes = mesActual();
   let filas = [];
+  let soloPendientes = false;   // ver las ventas que faltan por facturar en la DGI (todos los meses)
+  let hayFiscal = true;         // false si aún no se ejecutó el archivo 62
+  const puedeMarcar = empresa.rol !== 'lector';
   const resumen = h('div', { class: 'resumen' });
   const lista = h('div', { class: 'lista-cuentas' });
   const selMes = h('input', { type: 'month', value: mes, required: true });
 
   async function cargarMes() {
     const [d, s] = rangoMes(mes);
-    const consulta = (cols) => db.from('transacciones').select(cols)
-      .eq('empresa_id', id).gte('fecha', d).lt('fecha', s)
-      .order('fecha').order('creado_en');
+    const consulta = (cols) => {
+      let q = db.from('transacciones').select(cols).eq('empresa_id', id);
+      q = soloPendientes
+        ? q.eq('tipo', 'venta').eq('fiscal_emitida', false).eq('anulada', false)
+        : q.gte('fecha', d).lt('fecha', s);
+      return q.order('fecha').order('creado_en');
+    };
     const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id, creado_por';
-    let r = await consulta(base + ', anulada, motivo_anulacion');
+    const fiscal = ', fiscal_emitida, fiscal_numero, fiscal_fecha';
+    hayFiscal = true;
+    let r = await consulta(base + ', anulada, motivo_anulacion' + fiscal);
+    if (r.error && soloPendientes) { soloPendientes = false; toast('Falta ejecutar el archivo 62 en Supabase.', 'error'); r = await consulta(base + ', anulada, motivo_anulacion'); }
+    if (r.error) { hayFiscal = false; r = await consulta(base + ', anulada, motivo_anulacion'); } // sin archivo 62
     if (r.error) r = await consulta(base); // si aún no se ejecutó el archivo 53
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
     filas = r.data;
@@ -83,10 +94,11 @@ export async function vistaTransacciones(id) {
       chip('Compras y gastos', suma(COMPRAS, 'monto_bruto')),
       empresa.contribuyente_itbms ? chip('ITBMS pagado', suma(COMPRAS, 'itbms')) : null,
       chip('Cobros', suma(['cobro_cliente'], 'monto_neto')),
-      chip('Pagos', suma(['pago_proveedor'], 'monto_neto'))
+      chip('Pagos', suma(['pago_proveedor'], 'monto_neto')),
+      hayFiscal && !soloPendientes ? h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, 'Sin factura fiscal DGI'), h('strong', null, String(filas.filter((t) => !t.anulada && t.tipo === 'venta' && !t.fiscal_emitida).length))) : null
     ].filter(Boolean));
     if (filas.length === 0) {
-      lista.replaceChildren(h('p', { class: 'cargando' }, 'No hay transacciones en este mes.'));
+      lista.replaceChildren(h('p', { class: 'cargando' }, soloPendientes ? 'No hay ventas pendientes de factura fiscal.' : 'No hay transacciones en este mes.'));
       return;
     }
     lista.replaceChildren(...filas.map((t) => h('button', { class: 'trx' + (t.anulada ? ' anulada' : ''), type: 'button', onclick: () => detalle(t) },
@@ -94,7 +106,12 @@ export async function vistaTransacciones(id) {
         h('span', { class: 'insignia' }, TIPOS_TRX[t.tipo]),
         t.anulada ? h('span', { class: 'insignia aviso' }, 'Anulada') : null,
         h('span', { class: 'ayuda' }, fechaCorta(t.fecha)),
-        t.forma === 'credito' ? h('span', { class: 'insignia aviso' }, 'A crédito') : null),
+        t.forma === 'credito' ? h('span', { class: 'insignia aviso' }, 'A crédito') : null,
+        hayFiscal && t.tipo === 'venta' && !t.anulada
+          ? (t.fiscal_emitida
+            ? h('span', { class: 'insignia' }, '✔ Fiscal' + (t.fiscal_numero ? ' ' + t.fiscal_numero : ''))
+            : h('span', { class: 'insignia aviso' }, 'Falta factura fiscal'))
+          : null),
       h('div', { class: 'trx-nom' }, t.nombre_tercero || t.descripcion || '—'),
       h('div', { class: 'trx-montos' },
         h('span', { class: 'ayuda' }, [
@@ -142,9 +159,54 @@ export async function vistaTransacciones(id) {
       Number(t.itbms) > 0 ? dato('ITBMS', dinero(t.itbms)) : null,
       dato('Total', dinero(t.monto_neto)),
       dato('Forma de pago', t.forma === 'credito' ? 'A crédito' : 'Al contado'),
+      bloqueFiscal(t, recargar),
       dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
       dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
       acciones));
+  }
+
+  // Factura fiscal electrónica de la DGI: marca (ganchito) y número, para ventas
+  function bloqueFiscal(t, recargar) {
+    if (!hayFiscal || t.tipo !== 'venta' || t.anulada) return null;
+    if (t.fiscal_emitida) {
+      return h('div', { class: 'bloque-fiscal' },
+        h('p', null, h('strong', null, '✔ Factura fiscal DGI emitida'),
+          t.fiscal_numero ? ' · N.° ' + t.fiscal_numero : ' · sin número anotado',
+          t.fiscal_fecha ? ' · ' + fechaCorta(t.fiscal_fecha) : ''),
+        puedeMarcar ? h('div', { class: 'acciones' },
+          h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => formularioFiscal(t, recargar) }, 'Cambiar número'),
+          h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => confirmar({
+            titulo: 'Quitar la marca fiscal',
+            mensaje: 'La venta volverá a quedar como pendiente de factura fiscal y se borra el número anotado.',
+            boton: 'Quitar marca', peligro: false,
+            alConfirmar: async () => { await rpcOk(db, 'marcar_fiscal', { p_transaccion: t.id, p_emitida: false, p_numero: null, p_fecha: null }); toast('Marca quitada.', 'ok'); await recargar(); }
+          }) }, 'Quitar marca')) : null);
+    }
+    return h('div', { class: 'bloque-fiscal' },
+      h('p', null, h('strong', null, 'Falta la factura fiscal de la DGI'),
+        ' Cuando la emitas en el sistema de la DGI, márcala aquí.'),
+      puedeMarcar ? h('button', { class: 'btn btn-bloque', type: 'button', onclick: () => formularioFiscal(t, recargar) }, '✔ Ya la emití en la DGI') : null);
+  }
+
+  function formularioFiscal(t, recargar) {
+    let cerrar;
+    const num = h('input', { type: 'text', placeholder: 'Ej.: 0000000123', value: t.fiscal_numero || '' });
+    const fec = h('input', { type: 'date', value: t.fiscal_fecha || hoyISO() });
+    const ok = h('button', { class: 'btn btn-bloque', type: 'button', onclick: async () => {
+      ok.disabled = true;
+      try {
+        await rpcOk(db, 'marcar_fiscal', { p_transaccion: t.id, p_emitida: true, p_numero: num.value.trim() || null, p_fecha: fec.value || null });
+        toast('Factura fiscal marcada.', 'ok');
+        cerrar();
+        await recargar();
+      } catch (e) { ok.disabled = false; toast(traducirError(e), 'error'); }
+    } }, 'Guardar');
+    cerrar = modal('Factura fiscal de la DGI', h('div', null,
+      h('p', { class: 'ayuda' }, 'Anota el número que te dio la DGI. Puedes dejarlo vacío y completarlo después.'),
+      campo('Número de factura fiscal', num),
+      campo('Fecha de emisión', fec),
+      ok,
+      h('button', { class: 'btn btn-sec btn-bloque', type: 'button', onclick: () => cerrar() }, 'Cancelar')));
   }
 
   function abrirNueva(editando) {
@@ -483,10 +545,17 @@ export async function vistaTransacciones(id) {
   const anterior = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, -1); cargarMes(); } }, '‹');
   const siguiente = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, 1); cargarMes(); } }, '›');
 
+  const btnPend = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
+    soloPendientes = !soloPendientes;
+    btnPend.textContent = soloPendientes ? '‹ Volver al mes' : 'Ver ventas sin factura fiscal DGI';
+    await cargarMes();
+  } }, 'Ver ventas sin factura fiscal DGI');
+
   mostrar(marcoEmpresa(empresa, 'transacciones', [
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
+    h('div', { class: 'acciones' }, btnPend),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))
