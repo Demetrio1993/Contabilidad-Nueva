@@ -17,6 +17,7 @@ import { vistaAnalisis } from './analisis.js';
 import { vistaPanel } from './panel.js';
 import { vistaBitacora } from './bitacora.js';
 import { seccionUsuarios, seccionEliminar } from './acceso.js';
+import { seccionImportar } from './importar.js';
 
 /* ============================== acceso =============================== */
 
@@ -205,6 +206,7 @@ async function vistaEmpresaDatos(id) {
       irA(`#/empresa/${id}/datos`);
     }),
     seccionUsuarios(e),
+    seccionImportar(e),
     seccionEliminar(e)
   ]));
 }
