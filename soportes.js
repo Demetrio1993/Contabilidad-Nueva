@@ -2,6 +2,7 @@
 // Los archivos van a una carpeta privada de Supabase (bucket "soportes", hasta 5 MB) y solo
 // los ven los usuarios de la empresa. Se pueden ver desde la ficha de la transacción.
 import { db, h, toast, traducirError } from './lib.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import { confirmar } from './acciones.js';
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -33,18 +34,48 @@ async function reducirImagen(archivo) {
   } finally { URL.revokeObjectURL(url); }
 }
 
+// Copia el archivo a la memoria del teléfono. Algunos teléfonos Android dejan de
+// permitir leer el archivo original después de elegirlo y el envío falla con "Failed to fetch".
+async function copiarEnMemoria(archivo, mime) {
+  try {
+    const buf = await archivo.arrayBuffer();
+    return new Blob([buf], { type: mime });
+  } catch (e) {
+    throw new Error('No se pudo leer el archivo del teléfono. Vuelve a elegirlo o toma la foto otra vez.');
+  }
+}
+
 // Prepara el archivo: las fotos se reducen; los PDF deben pesar menos de 5 MB
 export async function prepararSoporte(archivo) {
   if (archivo.type === 'application/pdf') {
     if (archivo.size > MAX_BYTES) throw new Error('El PDF pesa más de 5 MB. Comprímelo o toma una foto.');
-    return { blob: archivo, mime: 'application/pdf', nombre: nombreSeguro(archivo.name) };
+    return { blob: await copiarEnMemoria(archivo, 'application/pdf'), mime: 'application/pdf', nombre: nombreSeguro(archivo.name) };
   }
   if (/^image\/(jpeg|png|webp)$/.test(archivo.type)) {
     const blob = await reducirImagen(archivo);
     if (blob.size > MAX_BYTES) throw new Error('La imagen sigue pesando más de 5 MB.');
-    return { blob, mime: 'image/jpeg', nombre: nombreSeguro((archivo.name || 'foto').replace(/\.[^.]+$/, '')) + '.jpg' };
+    return { blob: await copiarEnMemoria(blob, 'image/jpeg'), mime: 'image/jpeg', nombre: nombreSeguro((archivo.name || 'foto').replace(/\.[^.]+$/, '')) + '.jpg' };
   }
   throw new Error('Solo se aceptan fotos (JPG, PNG, WebP) y PDF.');
+}
+
+const ES_RED = /failed to fetch|networkerror|load failed|network request failed/i;
+
+// Envío directo a Storage (plan B si la librería falla por la red)
+async function subirDirecto(ruta, blob, mime) {
+  const ses = await db.auth.getSession();
+  const token = ses && ses.data && ses.data.session ? ses.data.session.access_token : SUPABASE_ANON_KEY;
+  const url = `${SUPABASE_URL}/storage/v1/object/soportes/${ruta.split('/').map(encodeURIComponent).join('/')}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token, 'Content-Type': mime, 'x-upsert': 'false', 'cache-control': '3600' },
+    body: blob
+  });
+  if (!r.ok) {
+    let msg = '';
+    try { const j = await r.json(); msg = j.message || j.error || ''; } catch (_) { /* sin cuerpo */ }
+    throw new Error(`El servidor rechazó el archivo (código ${r.status}${msg ? ': ' + msg : ''}).`);
+  }
 }
 
 // Sube el archivo y lo registra en la base. Devuelve el id del soporte.
@@ -52,7 +83,16 @@ export async function subirSoporte({ empresaId, transaccionId = null, notaId = n
   const p = await prepararSoporte(archivo);
   const ruta = `${empresaId}/${transaccionId || notaId || 'sin-asignar'}/${crypto.randomUUID()}-${p.nombre}`;
   const up = await db.storage.from('soportes').upload(ruta, p.blob, { contentType: p.mime, upsert: false });
-  if (up.error) throw up.error;
+  if (up.error) {
+    const m = String(up.error.message || up.error);
+    if (!ES_RED.test(m)) throw up.error;
+    // Plan B: envío directo; si también falla, se muestra el detalle real
+    try { await subirDirecto(ruta, p.blob, p.mime); } catch (e2) {
+      const det = e2 && e2.message ? e2.message : String(e2);
+      if (ES_RED.test(det)) throw new Error('No se pudo enviar el archivo a Supabase Storage (' + det + '). Si el internet funciona, revisa que el archivo 64 se haya ejecutado completo (carpeta "soportes" en Storage).');
+      throw e2;
+    }
+  }
   const r = await db.rpc('registrar_soporte', {
     p_empresa: empresaId, p_transaccion: transaccionId, p_nota: notaId,
     p_ruta: ruta, p_nombre: p.nombre, p_mime: p.mime, p_tamano: p.blob.size

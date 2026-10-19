@@ -2,7 +2,8 @@
 // Cada informe se describe con una "especificación":
 //   { titulo, subtitulo, columnas: [{ t, num, w }], grupos: [{ t, n, r }],
 //     filas: [{ c: [valores], e: 'normal' | 'n1' | 'n2' | 'grupo' | 'total' }],
-//     notas: [texto], horizontal: true|false, hoja: 'Nombre de la hoja' }
+//     notas: [texto], horizontal: true|false, hoja: 'Nombre de la hoja',
+//     graficas: [{ tipo:'barras', titulo, etiquetas, series:[{nombre,valores,color:'#rrggbb'}], linea, nota } | { tipo:'dona', titulo, items:[{nombre,valor}], centro }] (solo PDF) }
 // Los valores numéricos van como número; null deja la celda vacía.
 
 const enc = new TextEncoder();
@@ -438,6 +439,108 @@ export function construirPdf(specs, meta) {
           if (y + 10 > H - pie) nueva();
           texto(l, M, y + 7.5, 7.5, false, '0.35 0.4 0.38'); y += 10;
         });
+      });
+    }
+
+    // Gráficas con color (barras agrupadas con línea opcional, y anillos)
+    if (spec.graficas && spec.graficas.length) {
+      const num = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `${((n >> 16) & 255) / 255} ${((n >> 8) & 255) / 255} ${(n & 255) / 255}`; };
+      const recorta = (t, ancho, tamT, neg) => { let r = String(t); while (r.length > 1 && anchoTexto(r, tamT, neg) > ancho) r = r.slice(0, -1); return r; };
+      const espacio = (alto) => { if (y + alto > H - pie) nueva(); };
+      const leyenda = (items, x0, top, anchoMax) => {
+        let x = x0; let yy = top;
+        items.forEach((it) => {
+          const w = 14 + anchoTexto(it.nombre, 8, false) + 12;
+          if (x + w > x0 + anchoMax && x > x0) { x = x0; yy += 12; }
+          rect(x, yy, 8, 8, rgb(it.color)); texto(it.nombre, x + 12, yy + 7, 8, false); x += w;
+        });
+        return yy + 12 - top;
+      };
+      // Escala "bonita" para el eje vertical
+      const escala = (mn, mx) => {
+        const rango = (mx - mn) || 1; const paso0 = rango / 4;
+        const mag = Math.pow(10, Math.floor(Math.log10(paso0)));
+        const paso = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((v) => v >= paso0);
+        const lo = Math.floor(mn / paso) * paso; const hi = Math.ceil(mx / paso) * paso;
+        const marcas = []; for (let v = lo; v <= hi + paso / 2; v += paso) marcas.push(v);
+        return { lo, hi: hi === lo ? lo + paso : hi, marcas };
+      };
+      y += 14;
+      spec.graficas.forEach((g) => {
+        if (g.tipo === 'dona') {
+          const items = (g.items || []).filter((x) => x.valor > 0.004);
+          const total = items.reduce((a, x) => a + x.valor, 0);
+          const alto = 128;
+          espacio(alto + 22);
+          texto(g.titulo, M, y + 10, 10, true); y += 16;
+          if (!items.length) { texto('Sin datos para graficar.', M, y + 9, 8.5, false, '0.35 0.4 0.38'); y += 18; return; }
+          const cx = M + 62; const cy = y + 62; const R = 58; const r0 = 34;
+          let ang = -Math.PI / 2;
+          const pts = (a1, a2, rad, inv) => {
+            const n = Math.max(2, Math.ceil(Math.abs(a2 - a1) / 0.08)); const out = [];
+            for (let i = 0; i <= n; i++) { const a = inv ? a2 - (a2 - a1) * (i / n) : a1 + (a2 - a1) * (i / n); out.push([cx + rad * Math.cos(a), cy + rad * Math.sin(a)]); }
+            return out;
+          };
+          const colores = items.map((x, i) => x.color || ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#6250d6'][i % 6]);
+          items.forEach((x, i) => {
+            const a2 = ang + (x.valor / total) * Math.PI * 2 - (items.length > 1 ? 0.012 : 0);
+            const poly = pts(ang, a2, R, false).concat(pts(ang, a2, r0, true));
+            pag.ops.push(`${rgb(colores[i])} rg ${poly.map((p, k) => `${p[0].toFixed(2)} ${Y(p[1])} ${k ? 'l' : 'm'}`).join(' ')} h f`);
+            ang += (x.valor / total) * Math.PI * 2;
+          });
+          const ct = g.centro || ''; const cv = num(total);
+          texto(ct, cx - anchoTexto(ct, 7.5, false) / 2, cy - 1, 7.5, false, '0.35 0.4 0.38');
+          texto(cv, cx - anchoTexto(cv, 9, true) / 2, cy + 10, 9, true);
+          const lx = M + 140;
+          items.forEach((x, i) => {
+            const ly = y + 8 + i * 15; if (ly > y + alto - 8) return;
+            rect(lx, ly, 9, 9, rgb(colores[i]));
+            const nombre = recorta(x.nombre, util - 140 - 130, 8.5, false);
+            texto(nombre, lx + 14, ly + 8, 8.5, false);
+            const val = `${fmt(x.valor)}  (${((x.valor / total) * 100).toFixed(1)} %)`;
+            texto(val, M + util - anchoTexto(val, 8.5, true), ly + 8, 8.5, true);
+          });
+          y += alto;
+          return;
+        }
+        // barras agrupadas
+        const series = g.series || [];
+        const todas = series.flatMap((s2) => s2.valores).concat(g.linea ? g.linea.valores : []);
+        const alto = 168;
+        espacio(alto + 22);
+        texto(g.titulo, M, y + 10, 10, true); y += 15;
+        if (!todas.some((v) => Math.abs(v) > 0.004)) { texto('Sin datos para graficar.', M, y + 9, 8.5, false, '0.35 0.4 0.38'); y += 18; return; }
+        const items = series.map((s2) => ({ nombre: s2.nombre, color: s2.color }));
+        if (g.linea) items.push({ nombre: g.linea.nombre, color: g.linea.color });
+        y += leyenda(items, M, y, util) + 4;
+        const { lo, hi, marcas } = escala(Math.min(0, ...todas), Math.max(0, ...todas));
+        const ejeX = M + 52; const ancho = util - 56; const top = y + 4; const area = 110;
+        const py = (v) => top + area - ((v - lo) / (hi - lo)) * area;
+        marcas.forEach((v) => {
+          pag.ops.push(`${v === 0 ? '0.45 0.5 0.48' : GRIS_LINEA} RG ${v === 0 ? 0.8 : 0.4} w ${ejeX.toFixed(2)} ${Y(py(v))} m ${(ejeX + ancho).toFixed(2)} ${Y(py(v))} l S`);
+          const t = num(v); texto(t, ejeX - 4 - anchoTexto(t, 7, false), py(v) + 2.5, 7, false, '0.35 0.4 0.38');
+        });
+        const n = (g.etiquetas || []).length || 1; const grupoW = ancho / n;
+        const barW = Math.min(22, (grupoW * 0.78) / Math.max(1, series.length));
+        series.forEach((s2, si) => s2.valores.forEach((v, i) => {
+          const x = ejeX + i * grupoW + (grupoW - barW * series.length) / 2 + si * barW;
+          const y0 = py(0); const y1 = py(v);
+          if (Math.abs(v) < 0.004) return;
+          rect(x, Math.min(y0, y1), barW - 1, Math.abs(y1 - y0), rgb(s2.color));
+        }));
+        if (g.linea) {
+          const c = rgb(g.linea.color); const pp = g.linea.valores.map((v, i) => [ejeX + i * grupoW + grupoW / 2, py(v)]);
+          pag.ops.push(`${c} RG 1.6 w ${pp.map((p, k) => `${p[0].toFixed(2)} ${Y(p[1])} ${k ? 'l' : 'm'}`).join(' ')} S`);
+          pp.forEach((p) => pag.ops.push(`${c} rg ${(p[0] - 2).toFixed(2)} ${Y(p[1] + 2)} 4 4 re f`));
+        }
+        (g.etiquetas || []).forEach((t, i) => {
+          const tt = recorta(t, grupoW - 2, 7, false);
+          texto(tt, ejeX + i * grupoW + (grupoW - anchoTexto(tt, 7, false)) / 2, top + area + 11, 7, false, '0.35 0.4 0.38');
+        });
+        y = top + area + 20;
+        if (g.nota) { texto(g.nota, M, y + 7, 7.5, false, '0.35 0.4 0.38'); y += 11; }
+        y += 8;
       });
     }
   });

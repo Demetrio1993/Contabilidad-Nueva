@@ -99,7 +99,7 @@ function redactar(anio, d, razones, cxc, cxp) {
   return frases;
 }
 
-function specResumen(empresa, anio, d, razones, frases) {
+function specResumen(empresa, anio, d, razones, frases, graficas) {
   const ind = [
     ['Ingresos', ...valor(d.resultados, 1950)], ['Utilidad bruta', ...valor(d.resultados, 3000)],
     ['Utilidad operativa', ...valor(d.resultados, 5000)], ['Utilidad neta', ...valor(d.resultados, 11000)],
@@ -114,7 +114,8 @@ function specResumen(empresa, anio, d, razones, frases) {
     titulo: 'Resumen ejecutivo', subtitulo: `Año ${anio}`, hoja: 'Resumen ejecutivo',
     columnas: [{ t: 'Indicador', w: 1 }, { t: String(anio), num: true }, { t: String(anio - 1), num: true }, { t: 'Variación', num: true }],
     filas,
-    notas: frases
+    notas: frases,
+    graficas: graficas || []
   };
 }
 
@@ -145,7 +146,24 @@ export async function vistaPanel(id) {
       }
       const razones = calcularRazones(d.balance, d.resultados);
       const frases = redactar(est.anio, d, razones, cxc, cxp);
-      est.exp = { specs: [specResumen(empresa, est.anio, d, razones, frases)], archivo: `${empresa.razon_social}-resumen-ejecutivo-${est.anio}` };
+      const [tp0] = valor(d.balance, 6000);
+      const graficasPdf = [
+        { tipo: 'barras', titulo: `Ingresos, gastos y utilidad por mes, ${est.anio}`, etiquetas: MESES,
+          series: [{ nombre: 'Ingresos', valores: mensual.map((m) => m.ingresos), color: '#2a78d6' },
+            { nombre: 'Gastos y costos', valores: mensual.map((m) => m.gastos), color: '#eb6834' }],
+          linea: { nombre: 'Utilidad del mes', valores: mensual.map((m) => m.ingresos - m.gastos), color: '#1baf7a' },
+          nota: 'Montos en balboas.' },
+        { tipo: 'dona', titulo: `En qué se van los gastos y costos, ${est.anio}`, items: rubros, centro: 'Total' },
+        { tipo: 'dona', titulo: 'Cómo se financia el activo', centro: 'Activo',
+          items: [{ nombre: 'Pasivos', valor: tp0 }, { nombre: 'Patrimonio', valor: Math.max(0, valor(d.balance, 7950)[0]) }] },
+        { tipo: 'barras', titulo: 'Antigüedad de lo que se cobra y se paga', etiquetas: ['Hasta 30 días', '31 a 60', '61 a 90', 'Más de 90'],
+          series: [{ nombre: 'Por cobrar', valores: cxc.tramos, color: '#2a78d6' }, { nombre: 'Por pagar', valores: cxp.tramos, color: '#eb6834' }],
+          nota: `Al ${corte.split('-').reverse().join('/')}.` },
+        { tipo: 'barras', titulo: 'Año contra año', etiquetas: ['Ingresos', 'Costos', 'Gastos op.', 'Utilidad neta'],
+          series: [{ nombre: String(est.anio), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[0]), color: '#2a78d6' },
+            { nombre: String(est.anio - 1), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[1]), color: '#eda100' }] }
+      ];
+      est.exp = { specs: [specResumen(empresa, est.anio, d, razones, frases, graficasPdf)], archivo: `${empresa.razon_social}-resumen-ejecutivo-${est.anio}` };
 
       const [ing] = valor(d.resultados, 1950); const [un] = valor(d.resultados, 11000);
       const [ta] = valor(d.balance, 3000); const [tp] = valor(d.balance, 6000);

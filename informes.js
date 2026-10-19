@@ -170,7 +170,7 @@ export async function vistaInformes(id) {
 
   const est = {
     informe: 'diario', modo: 'mes', mes: hoy().slice(0, 7),
-    anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4'
+    anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues'
   };
   const barra = h('div', { class: 'filtros' });
   const zona = h('div');
@@ -332,11 +332,31 @@ export async function vistaInformes(id) {
     return { nodo, spec, archivo: archivoDe(`mayor-${cuenta.numero}`) };
   }
 
-  /* ---- balance de comprobación ---- */
-  async function balance() {
-    const [d, hasta] = rango();
-    const { data, error } = await db.rpc('balance_comprobacion', { p_empresa: id, p_desde: d, p_hasta: hasta });
-    if (error) throw error;
+  /* ---- balance de comprobación (antes y después de ajustes) ---- */
+  const VERSIONES = {
+    antes: 'antes de ajustes',
+    despues: 'después de ajustes',
+    cierre: 'después del cierre del año'
+  };
+
+  async function datosBalance(modo, d, hasta) {
+    // "después de ajustes" es el balance de siempre; las otras versiones usan la función del archivo 68
+    if (modo === 'despues') {
+      const r = await db.rpc('balance_comprobacion', { p_empresa: id, p_desde: d, p_hasta: hasta });
+      if (r.error) throw r.error;
+      return r.data;
+    }
+    const r = await db.rpc('balance_comprobacion_ajustes', { p_empresa: id, p_desde: d, p_hasta: hasta, p_modo: modo });
+    if (r.error) {
+      if (r.error.code === 'PGRST202' || r.error.code === '42883' || /could not find the function/i.test(r.error.message || '')) {
+        throw new Error('Falta ejecutar el archivo 68 en Supabase para ver el balance antes de ajustes o después del cierre.');
+      }
+      throw r.error;
+    }
+    return r.data;
+  }
+
+  function construirBalance(modo, data) {
     const maxNivel = Number(est.nivel);
     const filas = data.filter((r) => Number(r.nivel) <= maxNivel);
     const raiz = data.filter((r) => Number(r.nivel) === 1);
@@ -344,7 +364,9 @@ export async function vistaInformes(id) {
     const sd = redondear(suma(raiz, 'saldo_final_deudor'));
     const sa = redondear(suma(raiz, 'saldo_final_acreedor'));
     const sant = (v) => (Number(v) < 0 ? `${n2(-v)} A` : nz(v));
+    const etiqueta = VERSIONES[modo];
     const nodo = h('div', null,
+      h('h3', null, `Balance de comprobación ${etiqueta}`),
       h('div', { class: 'resumen' },
         chip('Saldos deudores', dinero(sd)), chip('Saldos acreedores', dinero(sa)),
         chip('Resultado', sd === sa ? 'Cuadrado' : 'Descuadrado'),
@@ -366,8 +388,13 @@ export async function vistaInformes(id) {
             celda(n2(suma(raiz, 'debitos')), 'num'), celda(n2(suma(raiz, 'creditos')), 'num'),
             celda(n2(sd), 'num'), celda(n2(sa), 'num')))))
         : h('p', { class: 'ayuda' }, 'No hay movimientos en el período.'));
+    const notaVersion = {
+      antes: 'Sin los asientos de ajuste (depreciación, impuesto sobre la renta y otros asientos de tipo Ajuste). Las anulaciones de transacciones sí se incluyen.',
+      despues: 'Con los asientos de ajuste y sin los asientos de cierre del año: son los saldos de cierre fiscal antes de cerrar las cuentas de resultado.',
+      cierre: 'Con los asientos de ajuste y con el cierre del año: las cuentas de resultado quedan en cero y solo permanecen las de balance.'
+    }[modo];
     const spec = filas.length ? {
-      titulo: 'Balance de comprobación', subtitulo: etiquetaPeriodo(), hoja: 'Balance de comprobación',
+      titulo: `Balance de comprobación ${etiqueta}`, subtitulo: etiquetaPeriodo(), hoja: `Comprobación ${modo === 'antes' ? 'antes' : (modo === 'cierre' ? 'cierre' : 'después')}`,
       columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Saldo anterior', num: true }, { t: 'Débitos', num: true },
         { t: 'Créditos', num: true }, { t: 'Saldo deudor', num: true }, { t: 'Saldo acreedor', num: true }],
       filas: [
@@ -377,9 +404,20 @@ export async function vistaInformes(id) {
           e: Number(r.nivel) === 1 ? 'n1' : (Number(r.nivel) === 2 ? 'n2' : 'normal')
         })),
         { c: ['Totales (cuentas de nivel 1)', null, redondear(suma(raiz, 'debitos')), redondear(suma(raiz, 'creditos')), sd, sa], e: 'total' }],
-      notas: ['Saldo anterior: positivo = deudor, negativo = acreedor. Los totales suman solo las cuentas de nivel 1 para no contar dos veces.']
+      notas: [notaVersion, 'Saldo anterior: positivo = deudor, negativo = acreedor. Los totales suman solo las cuentas de nivel 1 para no contar dos veces.']
     } : null;
-    return { nodo, spec, archivo: archivoDe('balance-comprobacion') };
+    return { nodo, spec };
+  }
+
+  async function balance() {
+    const [d, hasta] = rango();
+    const modos = est.version === 'ambos' ? ['antes', 'despues'] : [est.version];
+    const partes = [];
+    for (const m of modos) partes.push(construirBalance(m, await datosBalance(m, d, hasta)));
+    const specs = partes.map((x) => x.spec).filter(Boolean);
+    const nodo = h('div', null, ...partes.map((x) => x.nodo));
+    const nombre = { antes: 'antes-de-ajustes', despues: 'despues-de-ajustes', cierre: 'despues-del-cierre', ambos: 'antes-y-despues-de-ajustes' }[est.version];
+    return { nodo, spec: specs[0] || null, specs, archivo: archivoDe(`balance-comprobacion-${nombre}`) };
   }
 
   /* ---- hoja de trabajo ---- */
@@ -430,7 +468,7 @@ export async function vistaInformes(id) {
       zona.replaceChildren(
         h('div', { class: 'barra-exportar' }, barraExportar({
           empresa,
-          obtener: () => (est.actual && est.actual.spec ? { specs: [est.actual.spec], archivo: est.actual.archivo } : null)
+          obtener: () => (est.actual && est.actual.spec ? { specs: est.actual.specs || [est.actual.spec], archivo: est.actual.archivo } : null)
         })),
         r.nodo);
     } catch (e) {
@@ -460,6 +498,11 @@ export async function vistaInformes(id) {
         cuentas.map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))));
     }
     if (est.informe === 'balance') {
+      extra.push(h('select', { value: est.version, onchange: (e) => { est.version = e.target.value; pintar(); } },
+        h('option', { value: 'antes' }, 'Antes de ajustes'),
+        h('option', { value: 'despues' }, 'Después de ajustes (cierre fiscal)'),
+        h('option', { value: 'ambos' }, 'Antes y después (los dos)'),
+        h('option', { value: 'cierre' }, 'Después del cierre del año')));
       extra.push(h('select', { value: est.nivel, onchange: (e) => { est.nivel = e.target.value; pintar(); } },
         h('option', { value: '1' }, 'Solo cuentas mayores (nivel 1)'),
         h('option', { value: '2' }, 'Hasta nivel 2'),
