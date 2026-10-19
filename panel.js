@@ -6,6 +6,8 @@ import {
 import { barraExportar } from './informes.js';
 import { cargarEstados, calcularRazones, textoValor } from './analisis.js';
 import { n2 } from './exportar.js';
+import { barrasAgrupadas, dona } from './graficas.js';
+import { seccionVencimientos } from './vencimientos.js';
 
 const NUM = (v) => Number(v || 0);
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -42,8 +44,26 @@ async function cargarCartera(id, tipo, fecha) {
   const r = await db.rpc('cartera_morosidad', { p_empresa: id, p_tipo: tipo, p_fecha: fecha });
   if (r.error) throw r.error;
   const t = (r.data || []).find((x) => x.orden === 2);
-  if (!t) return { total: 0, vencida: 0 };
-  return { total: NUM(t.total), vencida: NUM(t.d91_120) + NUM(t.d121_150) + NUM(t.d151_180) + NUM(t.mas_180) };
+  if (!t) return { total: 0, vencida: 0, tramos: [0, 0, 0, 0] };
+  const mas90 = NUM(t.d91_120) + NUM(t.d121_150) + NUM(t.d151_180) + NUM(t.mas_180);
+  return { total: NUM(t.total), vencida: mas90, tramos: [NUM(t.hasta_30), NUM(t.d31_60), NUM(t.d61_90), mas90] };
+}
+
+// Gastos y costos del año por rubro (nivel 2 del catálogo; si no hay variedad, nivel 3)
+async function cargarGastosRubro(id, anio) {
+  const r = await db.rpc('balance_comprobacion', { p_empresa: id, p_desde: `${anio}-01-01`, p_hasta: `${anio}-12-31` });
+  if (r.error) throw r.error;
+  const filas = (r.data || []).filter((x) => ['costo', 'gasto', 'extraordinario'].includes(x.tipo));
+  const por = (nivel) => filas.filter((x) => Number(x.nivel) === nivel)
+    .map((x) => ({ nombre: String(x.nombre).replace(/^gastos? (de |del )?/i, '').trim() || x.nombre, valor: NUM(x.debitos) - NUM(x.creditos) }))
+    .filter((x) => x.valor > 0.004).sort((a, b) => b.valor - a.valor);
+  let lista = por(2);
+  if (lista.length < 2) lista = por(3);
+  if (lista.length > 6) {
+    const resto = lista.slice(5).reduce((a, x) => a + x.valor, 0);
+    lista = lista.slice(0, 5).concat([{ nombre: 'Otros', valor: resto }]);
+  }
+  return lista;
 }
 
 // Frases del resumen. Solo se escribe lo que los números permiten afirmar.
@@ -98,18 +118,6 @@ function specResumen(empresa, anio, d, razones, frases) {
   };
 }
 
-function barras(titulo, items) {
-  const max = Math.max(1, ...items.map((i) => Math.abs(i.v)));
-  return h('div', { class: 'tarjeta' }, h('h3', null, titulo),
-    ...items.map((i) => h('div', { class: 'barra-fila' },
-      h('span', { class: 'barra-etq' }, i.t),
-      h('div', { class: 'barra-pista' }, h('div', {
-        class: 'barra-relleno' + (i.v < 0 ? ' neg' : '') + (i.alt ? ' alt' : ''),
-        style: `width:${Math.max(2, (Math.abs(i.v) / max) * 100).toFixed(1)}%`
-      })),
-      h('span', { class: 'barra-val' }, n2(i.v)))));
-}
-
 export async function vistaPanel(id) {
   mostrar(marcoEmpresa({ id, razon_social: '…' }, 'panel', cargando()));
   const empresa = await cargarEmpresa(id);
@@ -124,9 +132,10 @@ export async function vistaPanel(id) {
     zona.replaceChildren(cargando());
     try {
       const corte = est.anio === Number(hoy().slice(0, 4)) ? hoy() : `${est.anio}-12-31`;
-      const [d, mensual, cxc, cxp] = await Promise.all([
+      const [d, mensual, cxc, cxp, rubros] = await Promise.all([
         cargarEstados(id, est.anio), cargarMensual(id, est.anio),
-        cargarCartera(id, 'cliente', corte), cargarCartera(id, 'proveedor', corte)
+        cargarCartera(id, 'cliente', corte), cargarCartera(id, 'proveedor', corte),
+        cargarGastosRubro(id, est.anio)
       ]);
       const hay = d.balance.some((x) => x.fila === 'detalle') || d.resultados.some((x) => x.fila === 'detalle');
       if (!hay) {
@@ -142,7 +151,6 @@ export async function vistaPanel(id) {
       const [ta] = valor(d.balance, 3000); const [tp] = valor(d.balance, 6000);
       const chip = (t, v) => h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, t), h('strong', null, v));
       const rc = razones.find((x) => x.nombre === 'Razón corriente');
-      const comp = (t, o) => { const [a, b] = valor(d.resultados, o); return [{ t: `${t} ${est.anio}`, v: a }, { t: `${t} ${est.anio - 1}`, v: b, alt: true }]; };
 
       zona.replaceChildren(
         barraExportar({ empresa, obtener: () => est.exp, etiquetaExcel: 'Resumen en Excel', etiquetaPdf: 'Resumen en PDF' }),
@@ -153,16 +161,40 @@ export async function vistaPanel(id) {
           chip('Por cobrar', dinero(cxc.total)), chip('Por pagar', dinero(cxp.total))),
         h('div', { class: 'tarjeta' }, h('h3', null, 'Resumen ejecutivo'),
           ...frases.map((x) => h('p', null, x))),
-        barras(`Ingresos y gastos por mes, ${est.anio}`, [].concat(...mensual.map((m, i) => [
-          { t: `${MESES[i]} ingresos`, v: m.ingresos }, { t: `${MESES[i]} gastos`, v: m.gastos, alt: true }]))),
-        barras('Año contra año', [].concat(comp('Ingresos', 1950), comp('Costos', 2950), comp('Gastos operativos', 4950), comp('Utilidad neta', 11000))));
+        barrasAgrupadas({
+          titulo: `Ingresos, gastos y utilidad por mes, ${est.anio}`,
+          etiquetas: MESES,
+          series: [{ nombre: 'Ingresos', valores: mensual.map((m) => m.ingresos), color: 'var(--g1)' },
+            { nombre: 'Gastos y costos', valores: mensual.map((m) => m.gastos), color: 'var(--g2)' }],
+          linea: { nombre: 'Utilidad del mes', valores: mensual.map((m) => m.ingresos - m.gastos), color: 'var(--g3)' },
+          nota: 'Montos en balboas. La línea baja de cero cuando el mes tuvo pérdida.'
+        }),
+        dona({ titulo: `En qué se van los gastos y costos, ${est.anio}`, items: rubros, centro: 'Total' }),
+        dona({
+          titulo: 'Cómo se financia el activo',
+          items: [{ nombre: 'Pasivos', valor: tp }, { nombre: 'Patrimonio', valor: Math.max(0, valor(d.balance, 7950)[0]) }],
+          centro: 'Activo', nota: `Activo total: ${dinero(ta)}.`
+        }),
+        barrasAgrupadas({
+          titulo: 'Antigüedad de lo que se cobra y se paga',
+          etiquetas: ['Hasta 30 días', '31 a 60', '61 a 90', 'Más de 90'],
+          series: [{ nombre: 'Por cobrar', valores: cxc.tramos, color: 'var(--g1)' },
+            { nombre: 'Por pagar', valores: cxp.tramos, color: 'var(--g2)' }],
+          nota: `Al ${corte.split('-').reverse().join('/')}.`
+        }),
+        barrasAgrupadas({
+          titulo: 'Año contra año',
+          etiquetas: ['Ingresos', 'Costos', 'Gastos op.', 'Utilidad neta'],
+          series: [{ nombre: String(est.anio), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[0]), color: 'var(--g1)' },
+            { nombre: String(est.anio - 1), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[1]), color: 'var(--g4)' }]
+        }));
     } catch (e) {
       est.exp = null;
       zona.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null, traducirError(e))));
     }
   }
 
-  mostrar(marcoEmpresa(empresa, 'panel', [h('div', { class: 'filtros' }, selAnio), zona]));
+  mostrar(marcoEmpresa(empresa, 'panel', [seccionVencimientos(empresa), h('div', { class: 'filtros' }, selAnio), zona]));
   pintar();
 }
 

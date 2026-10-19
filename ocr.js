@@ -142,7 +142,7 @@ export async function leerFactura(archivo, contexto) {
 }
 
 // Panel con los botones "Tomar foto" y "Elegir imagen o PDF"
-export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
+export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer, alArchivo }) {
   const estado = h('p', { class: 'ayuda' });
   const botones = [];
 
@@ -150,6 +150,7 @@ export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
     const archivo = ev.target.files && ev.target.files[0];
     ev.target.value = '';
     if (!archivo) return;
+    if (alArchivo) alArchivo(archivo);
     const esXml = /\.xml$/i.test(archivo.name || '') || /xml/i.test(archivo.type || '');
     estado.textContent = esXml ? 'Leyendo el XML…' : 'Leyendo la factura… puede tardar unos segundos.';
     botones.forEach((b) => { b.disabled = true; });
@@ -182,3 +183,4 @@ export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer }) {
     camara, galeria, xml, estado,
     h('p', { class: 'ayuda' }, 'El XML de la DGI se lee sin IA y es exacto; si tienes el XML, úsalo. El PDF o la foto los lee la IA y puede equivocarse: revisa siempre antes de registrar.'));
 }
+// FIN DEL ARCHIVO ocr.js

@@ -7,6 +7,7 @@ import {
 import { barraExportar } from './informes.js';
 import { tablaSimple } from './fiscal.js';
 import { confirmar, barraAcciones } from './acciones.js';
+import { abrirExtracto } from './extracto.js';
 
 const NUM = (v) => Number(v || 0);
 const E = { detalle: 'normal', total: 'total', control: 'n1', info: 'normal', subtotal: 'n1' };
@@ -42,8 +43,8 @@ function specTransito(rows, corte) {
   };
 }
 
-function abrirNota(id, cuentaId, cuentas, alGuardar, existente) {
-  const e = existente || {};
+function abrirNota(id, cuentaId, cuentas, alGuardar, existente, previo) {
+  const e = existente || previo || {};
   const f = {
     tipo: h('select', null,
       h('option', { value: 'nota_credito', selected: e.tipo !== 'nota_debito' }, 'Nota de crédito (el banco te acreditó, ej. intereses)'),
@@ -202,7 +203,18 @@ export async function vistaConciliacion(id) {
         h('div', { class: 'tarjeta' },
           h('h3', null, 'Saldo según el banco'),
           h('div', { class: 'acciones' }, saldo,
-            h('button', { class: 'btn', type: 'button', onclick: () => guardarSaldo(saldo.value) }, 'Guardar'))),
+            h('button', { class: 'btn', type: 'button', onclick: () => guardarSaldo(saldo.value) }, 'Guardar')),
+          h('div', { class: 'acciones' },
+            h('button', {
+              class: 'btn btn-sec btn-peq', type: 'button',
+              onclick: () => abrirExtracto({
+                movimientos: mov.data || [], corte: est.corte, alAplicar: pintar,
+                alSaldo: (v) => guardarSaldo(v),
+                alNota: (b) => abrirNota(id, est.cuenta, est.todas, pintar, null, {
+                  tipo: b.monto >= 0 ? 'nota_credito' : 'nota_debito', fecha: b.fecha, descripcion: b.desc, monto: Math.abs(b.monto)
+                })
+              })
+            }, 'Importar extracto del banco (Excel o CSV)'))),
         est.resumen.length
           ? tablaSimple([{ t: 'Concepto' }, { t: 'Monto', num: true }],
             est.resumen.map((x) => ({ c: [x.concepto, NUM(x.monto)], e: E[x.fila] || 'normal' })), 'estado')

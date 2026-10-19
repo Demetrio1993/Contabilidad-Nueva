@@ -3,6 +3,9 @@ import { db, estado, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta,
 import { abrirTercero } from './terceros.js';
 import { panelEscaneo } from './ocr.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
+import { panelSoportes, subirSoporte } from './soportes.js';
+import { bloqueNotasCredito } from './notascredito.js';
+import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
 
 const TIPOS_TRX = {
   venta: 'Venta',
@@ -57,6 +60,9 @@ export async function vistaTransacciones(id) {
   let filas = [];
   let soloPendientes = false;   // ver las ventas que faltan por facturar en la DGI (todos los meses)
   let hayFiscal = true;         // false si aún no se ejecutó el archivo 62
+  let notasMes = [];            // notas de crédito con fecha en el mes (para los totales)
+  let notasPorTrx = {};         // notas de crédito vigentes de cada transacción cargada
+  let recurrentesPend = 0;      // movimientos recurrentes que ya tocan
   const puedeMarcar = empresa.rol !== 'lector';
   const resumen = h('div', { class: 'resumen' });
   const lista = h('div', { class: 'lista-cuentas' });
@@ -74,25 +80,45 @@ export async function vistaTransacciones(id) {
     const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id, creado_por';
     const fiscal = ', fiscal_emitida, fiscal_numero, fiscal_fecha';
     hayFiscal = true;
-    let r = await consulta(base + ', anulada, motivo_anulacion' + fiscal);
+    let r = await consulta(base + ', anulada, motivo_anulacion' + fiscal + ', retencion_itbms');
+    if (r.error) r = await consulta(base + ', anulada, motivo_anulacion' + fiscal);   // sin archivo 64
     if (r.error && soloPendientes) { soloPendientes = false; toast('Falta ejecutar el archivo 62 en Supabase.', 'error'); r = await consulta(base + ', anulada, motivo_anulacion'); }
     if (r.error) { hayFiscal = false; r = await consulta(base + ', anulada, motivo_anulacion'); } // sin archivo 62
     if (r.error) r = await consulta(base); // si aún no se ejecutó el archivo 53
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
     filas = r.data;
     selMes.value = mes;
+    // Notas de crédito: las del mes (para los totales) y las de cada transacción (para la etiqueta)
+    notasMes = []; notasPorTrx = {};
+    if (!soloPendientes) {
+      const nm = await db.from('notas_credito').select('fecha, monto_bruto, itbms, monto_neto, anulada, transacciones(tipo)')
+        .eq('empresa_id', id).eq('anulada', false).gte('fecha', d).lt('fecha', s);
+      if (!nm.error) notasMes = nm.data || [];
+    }
+    if (filas.length) {
+      const np = await db.from('notas_credito').select('transaccion_id, monto_neto')
+        .eq('empresa_id', id).eq('anulada', false).in('transaccion_id', filas.map((t) => t.id));
+      if (!np.error) for (const n of np.data || []) notasPorTrx[n.transaccion_id] = (notasPorTrx[n.transaccion_id] || 0) + Number(n.monto_neto);
+    }
+    recurrentesPend = await contarPendientes(id);
     pintar();
   }
 
   function pintar() {
+    btnRec.textContent = recurrentesPend ? `⏰ Movimientos recurrentes (${recurrentesPend} por registrar)` : 'Movimientos recurrentes';
     const suma = (tipos, campoN) => filas.filter((t) => !t.anulada && tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
     const chip = (titulo, valor) => h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, titulo), h('strong', null, dinero(valor)));
+    // Las notas de crédito del mes restan de las ventas o de las compras y gastos
+    const notas = (tipos, campoN) => notasMes.filter((n) => n.transacciones && tipos.includes(n.transacciones.tipo))
+      .reduce((a, n) => a + Number(n[campoN]), 0);
+    const ncVentas = notas(['venta'], 'monto_bruto');
+    const ncCompras = notas(COMPRAS, 'monto_bruto');
     resumen.replaceChildren(...[
-      chip('Ventas', suma(['venta'], 'monto_bruto')),
-      empresa.contribuyente_itbms ? chip('ITBMS cobrado', suma(['venta'], 'itbms')) : null,
-      chip('Compras y gastos', suma(COMPRAS, 'monto_bruto')),
-      empresa.contribuyente_itbms ? chip('ITBMS pagado', suma(COMPRAS, 'itbms')) : null,
+      chip(ncVentas ? 'Ventas (menos notas de crédito)' : 'Ventas', suma(['venta'], 'monto_bruto') - ncVentas),
+      empresa.contribuyente_itbms ? chip('ITBMS cobrado', suma(['venta'], 'itbms') - notas(['venta'], 'itbms')) : null,
+      chip(ncCompras ? 'Compras y gastos (menos notas)' : 'Compras y gastos', suma(COMPRAS, 'monto_bruto') - ncCompras),
+      empresa.contribuyente_itbms ? chip('ITBMS pagado', suma(COMPRAS, 'itbms') - notas(COMPRAS, 'itbms')) : null,
       chip('Cobros', suma(['cobro_cliente'], 'monto_neto')),
       chip('Pagos', suma(['pago_proveedor'], 'monto_neto')),
       hayFiscal && !soloPendientes ? h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, 'Sin factura fiscal DGI'), h('strong', null, String(filas.filter((t) => !t.anulada && t.tipo === 'venta' && !t.fiscal_emitida).length))) : null
@@ -107,6 +133,8 @@ export async function vistaTransacciones(id) {
         t.anulada ? h('span', { class: 'insignia aviso' }, 'Anulada') : null,
         h('span', { class: 'ayuda' }, fechaCorta(t.fecha)),
         t.forma === 'credito' ? h('span', { class: 'insignia aviso' }, 'A crédito') : null,
+        notasPorTrx[t.id] ? h('span', { class: 'insignia gris' }, `Nota de crédito ${dinero(notasPorTrx[t.id])}`) : null,
+        Number(t.retencion_itbms) > 0 ? h('span', { class: 'insignia gris' }, `Retención ${dinero(t.retencion_itbms)}`) : null,
         hayFiscal && t.tipo === 'venta' && !t.anulada
           ? (t.fiscal_emitida
             ? h('span', { class: 'insignia' }, '✔ Fiscal' + (t.fiscal_numero ? ' ' + t.fiscal_numero : ''))
@@ -127,7 +155,10 @@ export async function vistaTransacciones(id) {
     const recargar = async () => { cerrar(); await cargarMes(); };
     const puedeCorregir = !soloRegistra || (miId && t.creado_por === miId);
     const acciones = !puedeCorregir ? null : barraAcciones({
-      editar: t.anulada ? null : () => { cerrar(); abrirNueva(t); },
+      editar: t.anulada ? null : () => {
+        if (notasPorTrx[t.id]) { toast('Esta factura tiene notas de crédito. Elimínalas antes de editarla.', 'error'); return; }
+        cerrar(); abrirNueva(t);
+      },
       anular: t.anulada ? null : () => pedirMotivo({
         titulo: 'Anular transacción',
         mensaje: 'Se conserva el registro, pero deja de contar. Se crea un asiento contrario con la misma fecha. Solo se puede si el mes está abierto.',
@@ -157,9 +188,15 @@ export async function vistaTransacciones(id) {
       dato('Descripción', t.descripcion),
       dato('Monto bruto', dinero(t.monto_bruto)),
       Number(t.itbms) > 0 ? dato('ITBMS', dinero(t.itbms)) : null,
+      Number(t.retencion_itbms) > 0 ? dato('ITBMS retenido', dinero(t.retencion_itbms)) : null,
       dato('Total', dinero(t.monto_neto)),
       dato('Forma de pago', t.forma === 'credito' ? 'A crédito' : 'Al contado'),
       bloqueFiscal(t, recargar),
+      bloqueNotasCredito({ t, empresa, miId, puedeRegistrar: puedeMarcar, alCambiar: recargar }),
+      panelSoportes({
+        empresaId: id, transaccionId: t.id, puedeSubir: puedeMarcar,
+        puedeQuitar: (x) => !soloRegistra || (miId && x.creado_por === miId)
+      }),
       dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
       dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
       acciones));
@@ -213,7 +250,7 @@ export async function vistaTransacciones(id) {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
       modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
-      lectura: null, nuevoTercero: null, duplicada: null
+      lectura: null, nuevoTercero: null, duplicada: null, retencion: '', soporte: null
     };
     const cuerpo = h('div');
     let cerrar;
@@ -222,11 +259,14 @@ export async function vistaTransacciones(id) {
     const esFactura = () => FACTURAS.includes(st.tipo);
     const llevaItbms = () => !!empresa.contribuyente_itbms && esFactura();
     const esCredito = () => esFactura() && st.forma === 'credito';
+    // Retención del ITBMS: solo empresas contribuyentes; en ventas y compras a crédito se anota al cobrar o pagar
+    const llevaRetencion = () => !!empresa.contribuyente_itbms && st.tipo !== 'otro' && !esCredito();
 
     function porDefecto() {
       st.lectura = null;
       st.duplicada = null;
       st.nuevoTercero = null;
+      st.retencion = '';
       st.forma = 'contado';
       st.tercero = '';
       st.principal = '';
@@ -252,6 +292,7 @@ export async function vistaTransacciones(id) {
       st.principal = editando.cuenta_principal_id;
       st.contra = (editando.forma === 'credito' && FACTURAS.includes(editando.tipo)) ? '' : editando.cuenta_contrapartida_id;
       if (Number(editando.itbms) > 0) { st.modoItbms = 'm'; st.itbmsManual = String(editando.itbms); } else st.modoItbms = '0';
+      st.retencion = Number(editando.retencion_itbms) > 0 ? String(editando.retencion_itbms) : '';
       st.todas = true;
     }
 
@@ -408,13 +449,18 @@ export async function vistaTransacciones(id) {
         p_itbms: itbmsValor(),
         p_cuenta_principal: st.principal,
         p_cuenta_contrapartida: esCredito() ? null : (st.contra || null),
-        p_forma: esFactura() ? st.forma : 'contado'
+        p_forma: esFactura() ? st.forma : 'contado',
+        p_retencion: llevaRetencion() ? Math.max(0, Number(st.retencion) || 0) : 0
       });
       boton.disabled = false;
       if (error) { toast(traducirError(error), 'error'); return; }
       if (!editando && st.lectura && st.lectura.cufe && nuevoId) {
         const c = await db.rpc('asignar_cufe', { p_transaccion: nuevoId, p_cufe: st.lectura.cufe });
         if (c.error) toast('Se registró, pero no se pudo guardar el código de la factura electrónica: ' + traducirError(c.error), 'error');
+      }
+      if (!editando && st.soporte && nuevoId) {
+        try { await subirSoporte({ empresaId: id, transaccionId: nuevoId, archivo: st.soporte }); }
+        catch (e) { toast('Se registró, pero no se pudo guardar el archivo adjunto: ' + traducirError(e), 'error'); }
       }
       toast(editando ? 'Cambios guardados.' : 'Transacción registrada con su asiento contable.', 'ok');
       cerrar();
@@ -479,6 +525,18 @@ export async function vistaTransacciones(id) {
           'Esta empresa no es contribuyente del ITBMS: escribe el monto total de la factura.');
       }
 
+      const etqRetencion = {
+        venta: 'ITBMS que tu cliente te retuvo', compra_mercancia: 'ITBMS que tú retienes al proveedor',
+        costo: 'ITBMS que tú retienes al proveedor', gasto: 'ITBMS que tú retienes al proveedor',
+        cobro_cliente: 'ITBMS que el cliente te retuvo en este cobro', pago_proveedor: 'ITBMS que retienes en este pago'
+      }[st.tipo];
+      const bloqueRetencion = llevaRetencion() ? campo(etqRetencion + ' (opcional)',
+        h('input', {
+          type: 'number', inputmode: 'decimal', step: '0.01', min: '0', placeholder: '0.00', value: st.retencion,
+          oninput: (e) => { st.retencion = e.target.value; }
+        }),
+        'Solo si hubo retención del impuesto. No puede pasar del ITBMS de la factura.') : null;
+
       totalEl = h('strong', null, '0.00');
       boton = h('button', { class: 'btn btn-bloque', type: 'submit' }, editando ? 'Guardar cambios' : 'Registrar');
 
@@ -504,6 +562,7 @@ export async function vistaTransacciones(id) {
       cuerpo.replaceChildren(h('form', { onsubmit: guardar },
         campo('Tipo de transacción', tipoSel),
         esFactura() ? panelEscaneo({
+          alArchivo: (a) => { if (!editando && /^(image\/|application\/pdf)/.test(a.type || '')) st.soporte = a; },
           obtenerContexto: () => ({
             rol: ['venta', 'cobro_cliente'].includes(st.tipo) ? 'cliente' : 'proveedor',
             contribuyente: !!empresa.contribuyente_itbms,
@@ -522,6 +581,7 @@ export async function vistaTransacciones(id) {
         campo('Descripción breve', h('input', { type: 'text', value: st.descripcion, oninput: (e) => { st.descripcion = e.target.value; } })),
         campo(llevaItbms() ? 'Monto bruto (sin ITBMS)' : 'Monto', brutoIn),
         bloqueItbms,
+        bloqueRetencion,
         h('p', { class: 'total-linea' }, 'Total: ', totalEl),
         formaSel ? campo('Forma de pago', formaSel) : null,
         campo(etqPrincipal, h('select', { value: st.principal, onchange: (e) => { st.principal = e.target.value; } },
@@ -533,6 +593,16 @@ export async function vistaTransacciones(id) {
         st.tipo === 'otro' ? null : h('label', { class: 'fila-check' },
           h('input', { type: 'checkbox', checked: st.todas, onchange: (e) => { st.todas = e.target.checked; pintarForm(); } }),
           h('span', null, 'Mostrar todas las cuentas del catálogo')),
+        editando ? null : h('div', { class: 'grupo' },
+          h('p', null, h('strong', null, 'Soporte de la factura (opcional)')),
+          st.soporte
+            ? h('p', { class: 'ayuda' }, `Se guardará con la transacción: ${st.soporte.name || 'archivo'}. `,
+              h('button', { class: 'enlace', type: 'button', onclick: () => { st.soporte = null; pintarForm(); } }, 'Quitar'))
+            : h('p', { class: 'ayuda' }, 'La foto o el PDF que leas con la IA se guardan solos. También puedes adjuntar uno ahora:'),
+          h('input', {
+            type: 'file', accept: 'image/*,application/pdf',
+            onchange: (e) => { const a = e.target.files && e.target.files[0]; if (a) { st.soporte = a; pintarForm(); } }
+          })),
         boton));
       actualizarTotales();
     }
@@ -545,6 +615,10 @@ export async function vistaTransacciones(id) {
   const anterior = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, -1); cargarMes(); } }, '‹');
   const siguiente = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, 1); cargarMes(); } }, '›');
 
+  const btnRec = h('button', {
+    class: 'btn btn-sec btn-peq', type: 'button',
+    onclick: () => abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar: cargarMes })
+  }, 'Movimientos recurrentes');
   const btnPend = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
     soloPendientes = !soloPendientes;
     btnPend.textContent = soloPendientes ? '‹ Volver al mes' : 'Ver ventas sin factura fiscal DGI';
@@ -555,10 +629,11 @@ export async function vistaTransacciones(id) {
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
-    h('div', { class: 'acciones' }, btnPend),
+    h('div', { class: 'acciones' }, btnPend, btnRec),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))
   ]));
   await cargarMes();
 }
+// FIN DEL ARCHIVO transacciones.js

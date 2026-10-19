@@ -9,7 +9,7 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
-export const VERSION = '24 · factura fiscal DGI';
+export const VERSION = '25 · soportes, notas de crédito, retención y gráficas';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -196,3 +196,4 @@ export function fechaCorta(f) {
   const [a, m, d] = String(f).slice(0, 10).split('-');
   return `${d}/${m}/${a}`;
 }
+// FIN DEL ARCHIVO lib.js

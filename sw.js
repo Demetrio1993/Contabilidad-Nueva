@@ -1,9 +1,9 @@
 // Service worker: permite instalar la app y, si no hay internet, abrir la
 // última versión guardada. Siempre intenta primero la red para que las
 // actualizaciones lleguen. No guarda nada de Supabase ni de otros sitios.
-const CACHE = 'contabilidad-v24';
+const CACHE = 'contabilidad-v25';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib.js', 'terceros.js',
-                  'transacciones.js', 'ocr.js', 'informes.js', 'exportar.js', 'estados.js', 'cierre.js', 'fiscal.js', 'cartera.js', 'activos.js', 'acciones.js', 'analisis.js', 'panel.js', 'facturaxml.js', 'bitacora.js', 'acceso.js', 'conciliacion.js', 'inventario.js', 'config.js', 'xlsxleer.js', 'importarlogica.js', 'importar.js', 'manifest.json',
+                  'transacciones.js', 'ocr.js', 'informes.js', 'exportar.js', 'estados.js', 'cierre.js', 'fiscal.js', 'cartera.js', 'activos.js', 'acciones.js', 'analisis.js', 'panel.js', 'facturaxml.js', 'bitacora.js', 'acceso.js', 'conciliacion.js', 'inventario.js', 'config.js', 'xlsxleer.js', 'importarlogica.js', 'importar.js', 'graficas.js', 'vencimientos.js', 'soportes.js', 'notascredito.js', 'recurrentes.js', 'extracto.js', 'respaldo.js', 'manifest.json',
                   'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -36,3 +36,4 @@ self.addEventListener('fetch', (e) => {
       .catch(() => caches.match(req).then((r) => r || caches.match('index.html')))
   );
 });
+// FIN DEL ARCHIVO sw.js

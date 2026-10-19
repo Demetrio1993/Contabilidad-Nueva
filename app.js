@@ -18,6 +18,7 @@ import { vistaPanel } from './panel.js';
 import { vistaBitacora } from './bitacora.js';
 import { seccionUsuarios, seccionEliminar } from './acceso.js';
 import { seccionImportar } from './importar.js';
+import { seccionRespaldo } from './respaldo.js';
 
 /* ============================== acceso =============================== */
 
@@ -205,6 +206,7 @@ async function vistaEmpresaDatos(id) {
       toast('Datos guardados.', 'ok');
       irA(`#/empresa/${id}/datos`);
     }),
+    seccionRespaldo(e),
     seccionUsuarios(e),
     seccionImportar(e),
     seccionEliminar(e)
@@ -493,3 +495,4 @@ if ('serviceWorker' in navigator) {
 }
 
 render();
+// FIN DEL ARCHIVO app.js
