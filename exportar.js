@@ -616,4 +616,26 @@ export function exportarPdf(specs, meta, archivo) {
   return nombre;
 }
 
+// Compartir con el menú del teléfono (correo, WhatsApp, etc.) con el archivo adjunto.
+// Devuelve 'compartido', 'cancelado' o 'descargado' (si el aparato no puede compartir archivos).
+export async function compartirArchivoInforme(specs, meta, archivo, tipo) {
+  const pdf = tipo === 'pdf';
+  const nombre = nombreSeguro(archivo) + (pdf ? '.pdf' : '.xlsx');
+  const mime = pdf ? 'application/pdf' : MIME_XLSX;
+  const bytes = pdf ? construirPdf(specs, meta) : construirXlsx(specs, meta);
+  const archivoF = new File([bytes], nombre, { type: mime });
+  const titulo = (specs[0] && specs[0].titulo) || 'Informe';
+  const empresa = meta && meta.empresa && meta.empresa.razon_social ? meta.empresa.razon_social : '';
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [archivoF] })) {
+      await navigator.share({ files: [archivoF], title: `${titulo}${empresa ? ' · ' + empresa : ''}`, text: `${titulo}${empresa ? ' de ' + empresa : ''}` });
+      return 'compartido';
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelado';
+  }
+  descargar(bytes, nombre, mime);
+  return 'descargado';
+}
+
 // FIN DEL ARCHIVO exportar.js

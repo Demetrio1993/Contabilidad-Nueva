@@ -6,6 +6,7 @@ import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 import { panelSoportes, subirSoporte } from './soportes.js';
 import { bloqueNotasCredito } from './notascredito.js';
 import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
+import { panelComentarios, pendientesAbiertos, contarPendientesEmpresa, abrirPendientes } from './comentarios.js';
 
 const TIPOS_TRX = {
   venta: 'Venta',
@@ -63,6 +64,8 @@ export async function vistaTransacciones(id) {
   let notasMes = [];            // notas de crédito con fecha en el mes (para los totales)
   let notasPorTrx = {};         // notas de crédito vigentes de cada transacción cargada
   let recurrentesPend = 0;      // movimientos recurrentes que ya tocan
+  let pendMapa = {};            // pendientes abiertos por transacción (comentarios)
+  let pendTotal = 0;            // pendientes abiertos de toda la empresa
   const puedeMarcar = empresa.rol !== 'lector';
   const resumen = h('div', { class: 'resumen' });
   const lista = h('div', { class: 'lista-cuentas' });
@@ -101,10 +104,13 @@ export async function vistaTransacciones(id) {
       if (!np.error) for (const n of np.data || []) notasPorTrx[n.transaccion_id] = (notasPorTrx[n.transaccion_id] || 0) + Number(n.monto_neto);
     }
     recurrentesPend = await contarPendientes(id);
+    pendMapa = (await pendientesAbiertos(id, filas.map((t) => t.id))) || {};
+    pendTotal = (await contarPendientesEmpresa(id)) || 0;
     pintar();
   }
 
   function pintar() {
+    btnComent.textContent = pendTotal ? `Pendientes (${pendTotal})` : 'Pendientes';
     btnRec.textContent = recurrentesPend ? `⏰ Movimientos recurrentes (${recurrentesPend} por registrar)` : 'Movimientos recurrentes';
     const suma = (tipos, campoN) => filas.filter((t) => !t.anulada && tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
@@ -131,6 +137,7 @@ export async function vistaTransacciones(id) {
       h('div', { class: 'trx-linea' },
         h('span', { class: 'insignia' }, TIPOS_TRX[t.tipo]),
         t.anulada ? h('span', { class: 'insignia aviso' }, 'Anulada') : null,
+        pendMapa[t.id] ? h('span', { class: 'insignia aviso' }, 'Pendiente') : null,
         h('span', { class: 'ayuda' }, fechaCorta(t.fecha)),
         t.forma === 'credito' ? h('span', { class: 'insignia aviso' }, 'A crédito') : null,
         notasPorTrx[t.id] ? h('span', { class: 'insignia gris' }, `Nota de crédito ${dinero(notasPorTrx[t.id])}`) : null,
@@ -197,6 +204,7 @@ export async function vistaTransacciones(id) {
         empresaId: id, transaccionId: t.id, puedeSubir: puedeMarcar,
         puedeQuitar: (x) => !soloRegistra || (miId && x.creado_por === miId)
       }),
+      panelComentarios({ empresaId: id, transaccionId: t.id, rol: empresa.rol, miId, alCambiar: cargarMes }),
       dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
       dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
       acciones));
@@ -619,6 +627,21 @@ export async function vistaTransacciones(id) {
     class: 'btn btn-sec btn-peq', type: 'button',
     onclick: () => abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar: cargarMes })
   }, 'Movimientos recurrentes');
+  const btnComent = h('button', {
+    class: 'btn btn-sec btn-peq', type: 'button',
+    onclick: () => abrirPendientes({
+      empresa, alCambiar: cargarMes,
+      abrirTransaccion: async (tid) => {
+        let t = filas.find((x) => x.id === tid);
+        if (!t) {
+          const r = await db.from('transacciones').select('*').eq('id', tid).maybeSingle();
+          if (r.error || !r.data) { toast('No se pudo abrir la transacción.', 'error'); return; }
+          t = r.data;
+        }
+        detalle(t);
+      }
+    })
+  }, 'Pendientes');
   const btnPend = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
     soloPendientes = !soloPendientes;
     btnPend.textContent = soloPendientes ? '‹ Volver al mes' : 'Ver ventas sin factura fiscal DGI';
@@ -629,7 +652,7 @@ export async function vistaTransacciones(id) {
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
-    h('div', { class: 'acciones' }, btnPend, btnRec),
+    h('div', { class: 'acciones' }, btnComent, btnPend, btnRec),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))

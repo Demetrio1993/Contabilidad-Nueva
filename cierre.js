@@ -5,6 +5,7 @@ import {
   marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { barraExportar, abrirAjuste } from './informes.js';
+import { tarjetaVerificacion } from './verificacion.js';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -221,7 +222,7 @@ export async function vistaCierre(id) {
           empresa,
           obtener: () => (est.datos ? { specs: specs(est.datos), archivo: `${empresa.razon_social}-cierre-${est.anio}` } : null)
         })),
-        seccionAnual(d), seccionMensual(d));
+        tarjetaVerificacion({ empresa, anio: est.anio }), seccionAnual(d), seccionMensual(d));
     } catch (e) {
       est.datos = null;
       zona.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null, traducirError(e))));

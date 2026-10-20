@@ -4,7 +4,7 @@ import {
   db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta,
   traducirError, cargando, marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
-import { exportarExcel, exportarPdf } from './exportar.js';
+import { exportarExcel, exportarPdf, compartirArchivoInforme } from './exportar.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 
 const ORIGENES = {
@@ -53,9 +53,28 @@ export function barraExportar({ empresa, obtener, etiquetaExcel, etiquetaPdf }) 
       if (boton) boton.disabled = false;
     }
   };
+  // Compartir: abre el menú del teléfono (correo, WhatsApp...) con el archivo adjunto
+  const compartir = (tipo) => async (ev) => {
+    const boton = ev && ev.target;
+    if (boton) boton.disabled = true;
+    try {
+      const r = await obtener();
+      if (!r) { toast('No hay datos para compartir. Elige un informe con información.', 'error'); return; }
+      const meta = { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } };
+      const res = await compartirArchivoInforme(r.specs, meta, r.archivo, tipo);
+      if (res === 'compartido') toast('Listo para enviar.', 'ok');
+      else if (res === 'descargado') toast('Este aparato no puede compartir archivos; se descargó para que lo adjuntes en tu correo.', 'info');
+    } catch (e) {
+      toast('No se pudo compartir: ' + traducirError(e), 'error');
+    } finally {
+      if (boton) boton.disabled = false;
+    }
+  };
   return h('div', { class: 'acciones' },
     h('button', { class: 'btn btn-sec', type: 'button', onclick: hacer('xlsx') }, etiquetaExcel || 'Descargar Excel'),
-    h('button', { class: 'btn btn-sec', type: 'button', onclick: hacer('pdf') }, etiquetaPdf || 'Descargar PDF'));
+    h('button', { class: 'btn btn-sec', type: 'button', onclick: hacer('pdf') }, etiquetaPdf || 'Descargar PDF'),
+    h('button', { class: 'btn btn-sec', type: 'button', onclick: compartir('pdf') }, 'Compartir PDF'),
+    h('button', { class: 'btn btn-sec', type: 'button', onclick: compartir('xlsx') }, 'Compartir Excel'));
 }
 
 /* ------------------------- asiento de ajuste manual ------------------------ */

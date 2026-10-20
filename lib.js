@@ -9,7 +9,7 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
-export const VERSION = '26 · soportes, gráficas en PDF y balance antes y después de ajustes';
+export const VERSION = '27 · comentarios y pendientes, lista del cierre, presupuesto y compartir por correo';
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -136,6 +136,7 @@ export function marcoEmpresa(empresa, pestana, contenido) {
     ['informes', 'Informes'],
     ['estados', 'Estados financieros'],
     ['cierre', 'Cierre'],
+    ['presupuesto', 'Presupuesto'],
     ['impuestos', 'Impuestos'],
     ['cartera', 'Cobrar y pagar'],
     ['activos', 'Activos'],

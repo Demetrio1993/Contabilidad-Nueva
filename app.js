@@ -8,6 +8,7 @@ import { vistaTransacciones } from './transacciones.js';
 import { vistaInformes } from './informes.js';
 import { vistaEstados } from './estados.js';
 import { vistaCierre } from './cierre.js';
+import { vistaPresupuesto } from './presupuesto.js';
 import { vistaImpuestos } from './fiscal.js';
 import { vistaCartera } from './cartera.js';
 import { vistaActivos } from './activos.js';
@@ -464,6 +465,7 @@ async function render() {
       else if (p[2] === 'informes') await vistaInformes(id);
       else if (p[2] === 'estados') await vistaEstados(id);
       else if (p[2] === 'cierre') await vistaCierre(id);
+      else if (p[2] === 'presupuesto') await vistaPresupuesto(id);
       else if (p[2] === 'impuestos') await vistaImpuestos(id);
       else if (p[2] === 'cartera') await vistaCartera(id);
       else if (p[2] === 'activos') await vistaActivos(id);
