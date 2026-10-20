@@ -34,8 +34,8 @@ export async function contarPendientesEmpresa(empresaId) {
 
 // Panel que va dentro del detalle de una transacción
 export function panelComentarios({ empresaId, transaccionId, rol, miId, alCambiar }) {
-  const puedeEscribir = ['administrador', 'contador', 'auxiliar'].includes(rol);
-  const puedeBorrarTodo = ['administrador', 'contador'].includes(rol);
+  const puedeEscribir = ['admin', 'contador', 'auxiliar'].includes(rol);
+  const puedeBorrarTodo = ['admin', 'contador'].includes(rol);
   const caja = h('div', { class: 'bloque-fiscal' });
   const lista = h('div');
   let aviso = null;
@@ -120,7 +120,7 @@ export function panelComentarios({ empresaId, transaccionId, rol, miId, alCambia
 
 // Ventana con todos los pendientes de la empresa
 export async function abrirPendientes({ empresa, abrirTransaccion, alCambiar }) {
-  const puedeResolver = ['administrador', 'contador', 'auxiliar'].includes(empresa.rol);
+  const puedeResolver = ['admin', 'contador', 'auxiliar'].includes(empresa.rol);
   const cuerpo = h('div', null, h('p', { class: 'cargando' }, 'Cargando…'));
   let verResueltos = false;
   const cerrar = modal('Pendientes', cuerpo);

@@ -6,6 +6,7 @@ import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 import { panelSoportes, subirSoporte } from './soportes.js';
 import { bloqueNotasCredito } from './notascredito.js';
 import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
+import { avisoRespaldo } from './respaldo.js';
 import { panelComentarios, pendientesAbiertos, contarPendientesEmpresa, abrirPendientes } from './comentarios.js';
 
 const TIPOS_TRX = {
@@ -649,6 +650,7 @@ export async function vistaTransacciones(id) {
   } }, 'Ver ventas sin factura fiscal DGI');
 
   mostrar(marcoEmpresa(empresa, 'transacciones', [
+    avisoRespaldo(empresa),
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,

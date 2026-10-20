@@ -27,7 +27,7 @@ const pct = (real, pres) => (Math.abs(pres) < 0.005 ? '—' : `${(real / pres * 
 export async function vistaPresupuesto(id) {
   mostrar(marcoEmpresa({ id, razon_social: '…' }, 'presupuesto', cargando()));
   const empresa = await cargarEmpresa(id);
-  const puedeEditar = ['administrador', 'contador'].includes(empresa.rol);
+  const puedeEditar = ['admin', 'contador'].includes(empresa.rol);
   const hoyD = hoy();
   const est = { anio: Number(hoyD.slice(0, 4)), mes: Number(hoyD.slice(5, 7)), datos: null, presup: [], cuentas: [] };
   const zona = h('div');

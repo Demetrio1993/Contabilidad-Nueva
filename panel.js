@@ -8,6 +8,7 @@ import { cargarEstados, calcularRazones, textoValor } from './analisis.js';
 import { n2 } from './exportar.js';
 import { barrasAgrupadas, dona } from './graficas.js';
 import { seccionVencimientos } from './vencimientos.js';
+import { avisoRespaldo } from './respaldo.js';
 
 const NUM = (v) => Number(v || 0);
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -212,7 +213,7 @@ export async function vistaPanel(id) {
     }
   }
 
-  mostrar(marcoEmpresa(empresa, 'panel', [seccionVencimientos(empresa), h('div', { class: 'filtros' }, selAnio), zona]));
+  mostrar(marcoEmpresa(empresa, 'panel', [avisoRespaldo(empresa), seccionVencimientos(empresa), h('div', { class: 'filtros' }, selAnio), zona]));
   pintar();
 }
 
