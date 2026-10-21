@@ -9,7 +9,9 @@ if (!window.supabase) {
 
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
-export const VERSION = '29 · eliminar empresa también borra los adjuntos';
+// Número de versión que se muestra al pie. La descripción de cada versión es solo interna (manual y memoria).
+export const VERSION = '30';
+// Versión 30: logo de la marca en todas las pantallas y en los PDF, pantalla de entrada rediseñada.
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
 export function h(tag, props, ...hijos) {
@@ -103,10 +105,26 @@ export async function salir() {
   irA('#/');
 }
 
+// Bloque de identidad: logo sobre fondo blanco (el logo tiene letras azul oscuro, se lee en modo claro y oscuro)
+// y los datos del contador. grande = pantalla de entrada; si no, versión compacta.
+export function bloqueMarca(grande) {
+  return h('div', { class: 'hero' + (grande ? ' hero-grande' : '') },
+    h('div', { class: 'hero-logo' }, h('img', { src: grande ? 'logo-completo.png' : 'logo-marca.png', alt: 'Demetrio Dutari Castro, Contador Público Autorizado' })),
+    h('div', { class: 'hero-texto' },
+      h('h1', null, 'Contabilidad para Empresas'),
+      h('p', { class: 'hero-nombre' }, 'Licdo. Demetrio Dutari Castro'),
+      h('p', { class: 'hero-cpa' }, 'Contador Público Autorizado'),
+      h('p', { class: 'hero-dato' }, 'RUC: 9-740-702 DV 37'),
+      h('p', { class: 'hero-dato' }, 'Santiago de Veraguas - República de Panamá'),
+      h('p', { class: 'hero-lema' }, 'Honestidad y transparencia, al servicio de Panamá.')));
+}
+
 export function marco(...contenido) {
   return h('div', { class: 'marco' },
     h('header', { class: 'barra' },
-      h('a', { class: 'marca', href: '#/empresas' }, 'Contabilidad'),
+      h('a', { class: 'marca', href: '#/empresas' },
+        h('span', { class: 'marca-logo' }, h('img', { src: 'logo-marca.png', alt: 'Logo' })),
+        h('span', { class: 'marca-texto' }, 'Contabilidad')),
       h('div', { class: 'barra-der' },
         h('span', { class: 'correo' }, estado.email),
         h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: salir }, 'Salir'))),

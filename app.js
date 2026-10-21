@@ -1,7 +1,7 @@
 // Contabilidad-Nueva · acceso, empresas, catálogo de cuentas y enrutador
 import {
   db, estado, h, toast, modal, mostrar, irA, texto, traducirError, campo, cargando,
-  errorVista, marco, marcoEmpresa, cargarEmpresa, cargarRol, pestanaPermitida
+  errorVista, marco, bloqueMarca, marcoEmpresa, cargarEmpresa, cargarRol, pestanaPermitida
 } from './lib.js';
 import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
@@ -60,9 +60,10 @@ function vistaLogin() {
     else toast('Te enviamos un correo para cambiar la contraseña.', 'ok');
   }
 
-  return h('div', { class: 'contenido' },
-    h('form', { class: 'tarjeta centrada', onsubmit: entrar },
-      h('h1', null, 'Contabilidad'),
+  return h('div', { class: 'contenido entrada' },
+    bloqueMarca(true),
+    h('form', { class: 'tarjeta', onsubmit: entrar },
+      h('h2', null, 'Ingresar'),
       h('p', { class: 'ayuda' }, 'Accede con tu correo y contraseña.'),
       campo('Correo', email),
       campo('Contraseña', clave),
@@ -109,6 +110,7 @@ async function vistaEmpresas() {
       e.activa ? null : h('span', { class: 'insignia aviso' }, 'Inactiva'))));
 
   mostrar(marco(
+    bloqueMarca(false),
     h('h1', { class: 'titulo' }, 'Mis empresas'),
     items.length ? items : h('div', { class: 'tarjeta' },
       h('p', null, 'Todavía no tienes empresas. Crea la primera: el catálogo de cuentas se carga solo.')),

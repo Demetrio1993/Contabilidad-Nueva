@@ -310,6 +310,24 @@ const VERDE = '0.043 0.420 0.341';
 const GRIS_FONDO = '0.933 0.953 0.945';
 const GRIS_LINEA = '0.82 0.85 0.84';
 
+// Logo para el encabezado de los PDF: se carga una vez al abrir la app (JPEG sobre fondo blanco).
+let logoPdf = null;
+fetch('logo-pdf.jpg').then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
+  if (!b) return;
+  const u = new Uint8Array(b);
+  let w = 0; let hh = 0;
+  for (let i = 2; i + 9 < u.length;) { // buscar el marcador de tamaño (SOF)
+    if (u[i] !== 0xff) { i++; continue; }
+    const m = u[i + 1];
+    if (m >= 0xc0 && m <= 0xc3) { hh = (u[i + 5] << 8) | u[i + 6]; w = (u[i + 7] << 8) | u[i + 8]; break; }
+    i += 2 + ((u[i + 2] << 8) | u[i + 3]);
+  }
+  if (!w || !hh) return;
+  let s = '';
+  for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192));
+  logoPdf = { w, h: hh, datos: s };
+}).catch(() => {});
+
 export function construirPdf(specs, meta) {
   const emp = encabezadoEmpresa(meta);
   const generado = ahoraTexto();
@@ -330,6 +348,12 @@ export function construirPdf(specs, meta) {
     const linea = (x1, y1, x2, color, grosor) => pag.ops.push(`${color} RG ${grosor || 0.5} w ${x1.toFixed(2)} ${Y(y1)} m ${x2.toFixed(2)} ${Y(y1)} l S`);
 
     nueva();
+    // Logo de la marca arriba a la derecha
+    if (logoPdf) {
+      const hl = 62; const wl = hl * logoPdf.w / logoPdf.h;
+      pag.logo = true;
+      pag.ops.push(`q ${wl.toFixed(2)} 0 0 ${hl} ${(W - M - wl).toFixed(2)} ${Y(M + hl - 2)} cm /Im1 Do Q`);
+    }
     // Bloque de encabezado del informe
     texto(emp.nombre, M, y + 11, 13, true); y += 16;
     if (emp.ruc) { texto(emp.ruc, M, y + 8, 8, false, '0.35 0.4 0.38'); y += 11; }
@@ -550,7 +574,7 @@ export function construirPdf(specs, meta) {
   paginas.forEach((p, i) => {
     const base = p.H - 22;
     p.ops.push(`0.82 0.85 0.84 RG 0.5 w 36 ${(p.H - 30).toFixed(2)} m ${(p.W - 36).toFixed(2)} ${(p.H - 30).toFixed(2)} l S`);
-    p.ops.push(`BT /F1 7.5 Tf 0.35 0.4 0.38 rg 36 ${base.toFixed(2)} Td (${literal(`Generado el ${generado}`)}) Tj ET`);
+    p.ops.push(`BT /F1 7.5 Tf 0.35 0.4 0.38 rg 36 ${base.toFixed(2)} Td (${literal(`Generado el ${generado} · Contabilidad para Empresas · Demetrio Dutari Castro, CPA`)}) Tj ET`);
     const t = `Página ${i + 1} de ${total}`;
     p.ops.push(`BT /F1 7.5 Tf 0.35 0.4 0.38 rg ${(p.W - 36 - anchoTexto(t, 7.5, false)).toFixed(2)} ${base.toFixed(2)} Td (${literal(t)}) Tj ET`);
   });
@@ -562,11 +586,14 @@ export function construirPdf(specs, meta) {
   agregar(''); // se llena con las páginas
   agregar('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   agregar('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  const idImg = logoPdf
+    ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoPdf.w} /Height ${logoPdf.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoPdf.datos.length} >>\nstream\n${logoPdf.datos}\nendstream`)
+    : 0;
   const ids = [];
   paginas.forEach((p) => {
     const contenido = p.ops.join('\n');
     const idC = agregar(`<< /Length ${contenido.length} >>\nstream\n${contenido}\nendstream`);
-    const idP = agregar(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.W.toFixed(2)} ${p.H.toFixed(2)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${idC} 0 R >>`);
+    const idP = agregar(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.W.toFixed(2)} ${p.H.toFixed(2)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${p.logo && idImg ? ` /XObject << /Im1 ${idImg} 0 R >>` : ''} >> /Contents ${idC} 0 R >>`);
     ids.push(idP);
   });
   objetos[1] = `<< /Type /Pages /Kids [${ids.map((i) => `${i} 0 R`).join(' ')}] /Count ${ids.length} >>`;
