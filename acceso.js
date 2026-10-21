@@ -113,9 +113,19 @@ export function seccionEliminar(empresa) {
           mensaje: `Se borrará ${empresa.razon_social} y todos sus datos. ¿Seguro?`,
           boton: 'Sí, eliminar para siempre',
           alConfirmar: async () => {
+            // Los archivos adjuntos viven en Storage y la base no puede borrarlos sola: se quitan primero
+            let sinBorrar = 0;
+            try {
+              const rs = await db.from('soportes').select('ruta').eq('empresa_id', empresa.id);
+              const rutas = (rs.data || []).map((x) => x.ruta).filter(Boolean);
+              for (let i = 0; i < rutas.length; i += 100) {
+                const q = await db.storage.from('soportes').remove(rutas.slice(i, i + 100));
+                if (q.error) sinBorrar += Math.min(100, rutas.length - i);
+              }
+            } catch (e) { sinBorrar += 1; }
             const r = await db.rpc('eliminar_empresa', { p_empresa: empresa.id, p_confirmacion: nombre.value.trim() });
             if (r.error) throw r.error;
-            toast('Empresa eliminada.', 'ok');
+            toast(sinBorrar ? 'Empresa eliminada. Algunos adjuntos no se pudieron borrar de Storage.' : 'Empresa eliminada.', 'ok');
             irA('#/empresas');
           }
         });
