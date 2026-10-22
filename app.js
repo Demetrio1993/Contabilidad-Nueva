@@ -20,6 +20,7 @@ import { vistaBitacora } from './bitacora.js';
 import { seccionUsuarios, seccionEliminar } from './acceso.js';
 import { seccionImportar } from './importar.js';
 import { seccionRespaldo } from './respaldo.js';
+import { bloqueAuxiliaresCuenta } from './auxiliares.js';
 
 /* ============================== acceso =============================== */
 
@@ -344,6 +345,7 @@ async function vistaCatalogo(id) {
         h('label', { class: 'fila-check' }, anexo, h('span', null, 'Esta cuenta lleva anexo')),
         campo('Número de anexo', anexoNum),
         campo('Línea de la declaración', linea)),
+      bloqueAuxiliaresCuenta({ empresaId: id, rol: empresa.rol, cuenta: c }),
       h('label', { class: 'fila-check' }, activa, h('span', null, 'Cuenta activa')),
       h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
       h('button', { class: 'btn btn-peligro btn-bloque', type: 'button', style: 'margin-top: 10px', onclick: eliminar }, 'Eliminar cuenta')));

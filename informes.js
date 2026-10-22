@@ -1,11 +1,12 @@
 // Informes contables: diario (con asientos de ajuste), mayor,
 // balance de comprobación (mensual o anual) y hoja de trabajo.
 import {
-  db, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta,
+  db, estado, h, mostrar, toast, modal, campo, texto, dinero, fechaCorta,
   traducirError, cargando, marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { exportarExcel, exportarPdf, compartirArchivoInforme } from './exportar.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
+import { cargarAuxiliares, campoAuxiliar, etiquetaAux, formularioAuxiliar, informeAuxiliares, puedeCrearAux } from './auxiliares.js';
 
 const ORIGENES = {
   manual: 'Manual', ajuste: 'Ajuste', apertura: 'Apertura', transaccion: 'Transacción',
@@ -17,7 +18,8 @@ const INFORMES = [
   ['diario', 'Diario general'],
   ['mayor', 'Mayor general'],
   ['balance', 'Balance de comprobación'],
-  ['hoja', 'Hoja de trabajo']
+  ['hoja', 'Hoja de trabajo'],
+  ['auxiliares', 'Auxiliares (saldos por auxiliar)']
 ];
 
 const n2 = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -86,6 +88,7 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar, existente) {
   const filas = [];
   const caja = h('div');
   const tot = h('p', { class: 'total-neto' });
+  const auxDatos = { lista: [], falta: true };
   const guardar = h('button', { class: 'btn', type: 'button' }, existente ? 'Guardar cambios' : 'Guardar asiento de ajuste');
 
   function sumas() {
@@ -101,14 +104,25 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar, existente) {
   }
   function agregar(pre) {
     const f = {
-      cuenta: h('select', null,
+      auxId: '',
+      cuenta: h('select', { onchange: () => { f.auxId = ''; f.pintarAux(); } },
         h('option', { value: '' }, 'Elegir cuenta…'),
         cuentas.map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))),
+      auxCaja: h('div'),
       debito: h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Débito', oninput: recalcular }),
       credito: h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Crédito', oninput: recalcular })
     };
+    f.pintarAux = () => {
+      const cta = cuentas.find((c) => c.id === f.cuenta.value);
+      const nodoAux = campoAuxiliar({
+        empresaId: id, rol: (estado.roles[id] || {}).rol || 'contador', etiqueta: 'Auxiliar (opcional)', cuenta: cta, datos: auxDatos,
+        valor: f.auxId, alCambiar: (v) => { f.auxId = v; }, redibujar: () => f.pintarAux()
+      });
+      f.auxCaja.replaceChildren(...(nodoAux ? [nodoAux] : []));
+    };
     f.caja = h('div', { class: 'linea-ajuste' },
       f.cuenta,
+      f.auxCaja,
       h('div', { class: 'par-montos' }, f.debito, f.credito),
       h('button', {
         class: 'btn btn-sec btn-peq', type: 'button',
@@ -119,12 +133,18 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar, existente) {
       }, 'Quitar línea'));
     if (pre && pre.cuenta_id) {
       f.cuenta.value = pre.cuenta_id;
+      f.auxId = pre.auxiliar_id || '';
       if (Number(pre.debito) > 0) f.debito.value = String(pre.debito);
       if (Number(pre.credito) > 0) f.credito.value = String(pre.credito);
     }
     filas.push(f);
     caja.append(f.caja);
+    f.pintarAux();
   }
+  cargarAuxiliares(id).then((r) => {
+    auxDatos.lista = r.lista; auxDatos.falta = r.falta;
+    filas.forEach((f) => f.pintarAux());
+  });
   if (existente && existente.lineas && existente.lineas.length) existente.lineas.forEach((l) => agregar(l));
   else { agregar(); agregar(); }
   recalcular();
@@ -144,6 +164,7 @@ export function abrirAjuste(id, cuentas, fechaInicial, alGuardar, existente) {
     guardar.disabled = true;
     const lineas = usadas.map((f) => ({
       cuenta_id: f.cuenta.value,
+      auxiliar_id: f.auxId || null,
       debito: Number(f.debito.value || 0),
       credito: Number(f.credito.value || 0)
     }));
@@ -187,9 +208,11 @@ export async function vistaInformes(id) {
     .order('numero').range(0, 4999);
   if (errC) throw errC;
 
+  const auxDatos = await cargarAuxiliares(id);
   const est = {
     informe: 'diario', modo: 'mes', mes: hoy().slice(0, 7),
-    anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues'
+    anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues',
+    cuentaAux: '', verCeros: false
   };
   const barra = h('div', { class: 'filtros' });
   const zona = h('div');
@@ -229,7 +252,7 @@ export async function vistaInformes(id) {
     return barraAcciones({
       editar: a.anulado ? null : () => abrirAjuste(id, cuentas, a.fecha, pintar, {
         id: a.id, fecha: a.fecha, descripcion: a.descripcion, referencia: a.referencia,
-        lineas: ls.map((l) => ({ cuenta_id: l.cuenta_id, debito: l.debito, credito: l.credito }))
+        lineas: ls.map((l) => ({ cuenta_id: l.cuenta_id, auxiliar_id: l.auxiliar_id || null, debito: l.debito, credito: l.credito }))
       }),
       anular: a.anulado ? null : () => pedirMotivo({
         titulo: 'Anular asiento',
@@ -248,9 +271,15 @@ export async function vistaInformes(id) {
   async function diario() {
     const [d, hasta] = rango();
     let r = await db.from('asientos')
-      .select('id, consecutivo, fecha, descripcion, referencia, origen, anulado, motivo_anulacion, asiento_lineas(cuenta_id, debito, credito, descripcion, cuentas(numero, nombre))')
+      .select('id, consecutivo, fecha, descripcion, referencia, origen, anulado, motivo_anulacion, asiento_lineas(cuenta_id, auxiliar_id, debito, credito, descripcion, cuentas(numero, nombre), auxiliares(codigo, nombre))')
       .eq('empresa_id', id).gte('fecha', d).lte('fecha', hasta)
       .order('fecha').order('consecutivo').range(0, 4999);
+    if (r.error && /auxiliar/.test(r.error.message || '')) {   // sin archivo 77
+      r = await db.from('asientos')
+        .select('id, consecutivo, fecha, descripcion, referencia, origen, anulado, motivo_anulacion, asiento_lineas(cuenta_id, debito, credito, descripcion, cuentas(numero, nombre))')
+        .eq('empresa_id', id).gte('fecha', d).lte('fecha', hasta)
+        .order('fecha').order('consecutivo').range(0, 4999);
+    }
     if (r.error && /anulado|motivo_anulacion/.test(r.error.message || '')) {
       r = await db.from('asientos')
         .select('id, consecutivo, fecha, descripcion, referencia, origen, asiento_lineas(cuenta_id, debito, credito, descripcion, cuentas(numero, nombre))')
@@ -269,7 +298,7 @@ export async function vistaInformes(id) {
         td += Number(l.debito); tc += Number(l.credito);
         filasSpec.push({
           c: [i === 0 ? fechaCorta(a.fecha) : '', i === 0 ? String(a.consecutivo) : '',
-            l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` : '',
+            l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` + (l.auxiliares ? ` · ${l.auxiliares.codigo} ${l.auxiliares.nombre}` : '') : '',
             i === 0 ? a.descripcion + (a.referencia ? ` · ${a.referencia}` : '') : '',
             nulo0(l.debito), nulo0(l.credito)],
           e: i === 0 ? 'normal' : 'normal'
@@ -284,7 +313,7 @@ export async function vistaInformes(id) {
         h('p', { class: 'trx-nom' }, a.descripcion + (a.referencia ? ` · ${a.referencia}` : '')),
         h('div', { class: 'linea-asiento cab' }, h('span', null, 'Cuenta'), h('span', { class: 'monto' }, 'Débito'), h('span', { class: 'monto' }, 'Crédito')),
         ls.map((l) => h('div', { class: 'linea-asiento' },
-          h('span', null, l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` : ''),
+          h('span', null, l.cuentas ? `${l.cuentas.numero} ${l.cuentas.nombre}` + (l.auxiliares ? ` · ${l.auxiliares.codigo} ${l.auxiliares.nombre}` : '') : ''),
           h('span', { class: 'monto' }, nz(l.debito)),
           h('span', { class: 'monto' }, nz(l.credito)))),
         accionesAsiento(a, ls));
@@ -390,13 +419,13 @@ export async function vistaInformes(id) {
         chip('Saldos deudores', dinero(sd)), chip('Saldos acreedores', dinero(sa)),
         chip('Resultado', sd === sa ? 'Cuadrado' : 'Descuadrado'),
         chip('Período', etiquetaPeriodo())),
-      h('p', { class: 'ayuda' }, 'Saldo anterior: sin letra es deudor y con "A" es acreedor. Los totales suman solo las cuentas mayores (nivel 1) para no contar dos veces.'),
+      h('p', { class: 'ayuda' }, 'Saldo anterior: sin letra es deudor y con "A" es acreedor. Saldo actual = saldo anterior + débitos − créditos. Los totales suman solo las cuentas mayores (nivel 1) para no contar dos veces.'),
       filas.length
         ? tablaScroll(h('table', { class: 'tabla' },
           h('thead', null, h('tr', null,
             h('th', null, 'Cuenta'), h('th', { class: 'num' }, 'Saldo ant.'),
             h('th', { class: 'num' }, 'Débitos'), h('th', { class: 'num' }, 'Créditos'),
-            h('th', { class: 'num' }, 'Deudor'), h('th', { class: 'num' }, 'Acreedor'))),
+            h('th', { class: 'num' }, 'Actual deudor'), h('th', { class: 'num' }, 'Actual acreedor'))),
           h('tbody', null, filas.map((r) => h('tr', { class: 'nivel-' + r.nivel },
             celda(`${r.numero} ${r.nombre}`),
             celda(sant(r.saldo_anterior), 'num'), celda(nz(r.debitos), 'num'), celda(nz(r.creditos), 'num'),
@@ -415,7 +444,7 @@ export async function vistaInformes(id) {
     const spec = filas.length ? {
       titulo: `Balance de comprobación ${etiqueta}`, subtitulo: etiquetaPeriodo(), hoja: `Comprobación ${modo === 'antes' ? 'antes' : (modo === 'cierre' ? 'cierre' : 'después')}`,
       columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Saldo anterior', num: true }, { t: 'Débitos', num: true },
-        { t: 'Créditos', num: true }, { t: 'Saldo deudor', num: true }, { t: 'Saldo acreedor', num: true }],
+        { t: 'Créditos', num: true }, { t: 'Saldo actual deudor', num: true }, { t: 'Saldo actual acreedor', num: true }],
       filas: [
         ...filas.map((r) => ({
           c: [`${r.numero} ${r.nombre}`, nulo0(r.saldo_anterior), nulo0(r.debitos), nulo0(r.creditos),
@@ -477,7 +506,17 @@ export async function vistaInformes(id) {
     return { nodo, spec, archivo: archivoDe('hoja-de-trabajo') };
   }
 
-  const construir = { diario, mayor, balance, hoja };
+  /* ---- auxiliares ---- */
+  async function auxiliares() {
+    if (auxDatos.falta) throw new Error('Falta ejecutar el archivo 77 en Supabase para usar auxiliares.');
+    return informeAuxiliares({
+      empresa, id, rango, etiquetaPeriodo, archivoDe, barraExportar,
+      cuentaId: est.cuentaAux, verCeros: est.verCeros,
+      alCambiar: async () => { const r = await cargarAuxiliares(id); auxDatos.lista = r.lista; auxDatos.falta = r.falta; armarBarra(); pintar(); }
+    });
+  }
+
+  const construir = { diario, mayor, balance, hoja, auxiliares };
 
   async function pintar() {
     zona.replaceChildren(cargando());
@@ -528,7 +567,41 @@ export async function vistaInformes(id) {
         h('option', { value: '3' }, 'Hasta nivel 3'),
         h('option', { value: '4' }, 'Todas las cuentas (nivel 4)')));
     }
+    if (est.informe === 'auxiliares') {
+      const conAux = [...new Set(auxDatos.lista.map((a) => a.cuenta_id))];
+      extra.push(h('select', { value: est.cuentaAux, onchange: (e) => { est.cuentaAux = e.target.value; pintar(); } },
+        h('option', { value: '' }, 'Todas las cuentas con auxiliares'),
+        cuentas.filter((c) => conAux.includes(c.id)).map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))));
+      extra.push(h('label', { class: 'fila-check' },
+        h('input', { type: 'checkbox', checked: est.verCeros, onchange: (e) => { est.verCeros = e.target.checked; pintar(); } }),
+        h('span', null, 'Mostrar auxiliares sin movimiento ni saldo')));
+      if (puedeCrearAux(empresa.rol)) {
+        extra.push(h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: nuevoAuxiliar }, '+ Nuevo auxiliar'));
+      }
+    }
     barra.replaceChildren(selInforme, selModo, periodo, ...extra);
+  }
+
+  // Crear un auxiliar eligiendo primero la cuenta
+  function nuevoAuxiliar() {
+    const sel = h('select', { value: est.cuentaAux },
+      h('option', { value: '' }, 'Elegir cuenta…'),
+      cuentas.map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`)));
+    let cerrar;
+    cerrar = modal('Nuevo auxiliar', h('div', null,
+      campo('¿En qué cuenta?', sel, 'Las cuentas que reciben movimientos. Ej.: 1.1.02.001 Clientes locales.'),
+      h('button', {
+        class: 'btn btn-bloque', type: 'button',
+        onclick: () => {
+          const c = cuentas.find((x) => x.id === sel.value);
+          if (!c) { toast('Elige la cuenta.', 'error'); return; }
+          cerrar();
+          formularioAuxiliar({
+            empresaId: id, rol: empresa.rol, cuenta: c,
+            alGuardar: (fila) => { if (fila) { auxDatos.lista.push(fila); auxDatos.falta = false; est.cuentaAux = c.id; armarBarra(); pintar(); } }
+          });
+        }
+      }, 'Continuar')));
   }
 
   armarBarra();

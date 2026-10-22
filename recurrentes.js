@@ -2,6 +2,7 @@
 // avisa cuáles tocan; tú confirmas el monto y se registra la transacción con su asiento.
 import { db, h, toast, modal, campo, texto, dinero, fechaCorta, hoy, traducirError } from './lib.js';
 import { confirmar, barraAcciones, rpcOk } from './acciones.js';
+import { campoAuxiliar } from './auxiliares.js';
 
 const TIPOS = {
   venta: 'Venta', compra_mercancia: 'Compra de mercancía', costo: 'Costo', gasto: 'Gasto',
@@ -15,11 +16,13 @@ export async function contarPendientes(empresaId) {
   return r.error ? 0 : (r.count || 0);
 }
 
-function formulario({ empresa, cuentas, terceros, clave, existente, alGuardar }) {
+function formulario({ empresa, cuentas, terceros, clave, existente, alGuardar, auxDatos }) {
+  const datosAux = auxDatos || { lista: [], falta: true };
   const e = existente || {};
   const st = {
     tipo: e.tipo || 'gasto', forma: e.forma || 'contado', principal: e.cuenta_principal_id || '',
-    contra: e.cuenta_contrapartida_id || clave.caja || '', tercero: e.tercero_id || ''
+    contra: e.cuenta_contrapartida_id || clave.caja || '', tercero: e.tercero_id || '',
+    auxP: e.aux_principal_id || '', auxC: e.aux_contra_id || ''
   };
   const cuerpo = h('div');
   let cerrar;
@@ -63,8 +66,18 @@ function formulario({ empresa, cuentas, terceros, clave, existente, alGuardar })
       esF ? campo('Forma de pago', h('select', { onchange: (ev) => { st.forma = ev.target.value; pintar(); } },
         h('option', { value: 'contado', selected: st.forma === 'contado' }, 'Al contado'),
         h('option', { value: 'credito', selected: st.forma === 'credito' }, 'A crédito'))) : null,
-      campo('Cuenta principal', h('select', { required: true, onchange: (ev) => { st.principal = ev.target.value; } }, opciones(lista(), 'Elige una cuenta', st.principal))),
-      credito ? null : campo('Cuenta de caja, banco o contrapartida', h('select', { required: true, onchange: (ev) => { st.contra = ev.target.value; } }, opciones(cuentas, 'Elige una cuenta', st.contra))),
+      campo('Cuenta principal', h('select', { required: true, onchange: (ev) => { st.principal = ev.target.value; st.auxP = ''; pintar(); } }, opciones(lista(), 'Elige una cuenta', st.principal))),
+      campoAuxiliar({
+        empresaId: empresa.id, rol: empresa.rol, etiqueta: 'Auxiliar de la cuenta principal', cuenta: cuentas.find((c) => c.id === st.principal),
+        datos: datosAux, valor: st.auxP, alCambiar: (v) => { st.auxP = v; }, redibujar: pintar
+      }),
+      credito ? null : campo('Cuenta de caja, banco o contrapartida', h('select', { required: true, onchange: (ev) => { st.contra = ev.target.value; st.auxC = ''; pintar(); } }, opciones(cuentas, 'Elige una cuenta', st.contra))),
+      campoAuxiliar({
+        empresaId: empresa.id, rol: empresa.rol,
+        etiqueta: credito ? (st.tipo === 'venta' ? 'Auxiliar de Clientes' : 'Auxiliar de Proveedores') : 'Auxiliar de la contrapartida',
+        cuenta: cuentas.find((c) => c.id === (credito ? (st.tipo === 'venta' ? clave.cxc : clave.cxp) : st.contra)),
+        datos: datosAux, valor: st.auxC, alCambiar: (v) => { st.auxC = v; }, redibujar: pintar
+      }),
       campo('Día del mes en que se repite', dia),
       campo('Próxima fecha', prox),
       h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
@@ -77,7 +90,7 @@ function formulario({ empresa, cuentas, terceros, clave, existente, alGuardar })
     if (!st.principal) { toast('Elige la cuenta principal.', 'error'); return; }
     if (!credito && !st.contra) { toast('Elige la cuenta de caja, banco o contrapartida.', 'error'); return; }
     try {
-      await rpcOk(db, 'guardar_recurrente', {
+      const idRec = await rpcOk(db, 'guardar_recurrente', {
         p_id: existente ? existente.id : null, p_empresa: empresa.id, p_nombre: nombre.value.trim(), p_tipo: st.tipo,
         p_tercero: st.tipo === 'otro' ? null : (st.tercero || null), p_descripcion: texto(desc.value),
         p_monto: Number(monto.value), p_itbms: empresa.contribuyente_itbms && esF ? Number(itbms.value || 0) : 0,
@@ -85,6 +98,10 @@ function formulario({ empresa, cuentas, terceros, clave, existente, alGuardar })
         p_forma: esF ? st.forma : 'contado', p_cuenta_principal: st.principal,
         p_cuenta_contrapartida: credito ? null : (st.contra || null), p_dia: Number(dia.value), p_proxima: prox.value
       });
+      if (!datosAux.falta && (st.auxP || st.auxC || existente)) {
+        const fa = await db.rpc('fijar_auxiliares_recurrente', { p_id: idRec, p_aux_principal: st.auxP || null, p_aux_contra: st.auxC || null });
+        if (fa.error) toast('Se guardó, pero no se pudo guardar el auxiliar: ' + traducirError(fa.error), 'error');
+      }
       toast('Movimiento recurrente guardado.', 'ok');
       cerrar();
       alGuardar();
@@ -123,7 +140,7 @@ function registrarAhora(r, empresa, alRegistrar) {
   h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Registrar')));
 }
 
-export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar }) {
+export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar, auxDatos }) {
   const cuerpo = h('div', null, h('p', { class: 'ayuda' }, 'Cargando…'));
   let cerrar;
   const refrescar = () => { cargar(); alCambiar && alCambiar(); };
@@ -158,7 +175,7 @@ export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar 
               onclick: async () => { try { await rpcOk(db, 'pausar_recurrente', { p_id: x.id, p_activa: !x.activa }); refrescar(); } catch (err) { toast(traducirError(err), 'error'); } }
             }, x.activa ? 'Pausar' : 'Reanudar')),
           barraAcciones({
-            editar: () => formulario({ empresa, cuentas, terceros, clave, existente: x, alGuardar: refrescar }),
+            editar: () => formulario({ empresa, cuentas, terceros, clave, existente: x, alGuardar: refrescar, auxDatos }),
             eliminar: () => confirmar({
               titulo: 'Eliminar movimiento recurrente', mensaje: 'Se borra solo la plantilla; lo ya registrado no cambia.', boton: 'Eliminar',
               alConfirmar: async () => { await rpcOk(db, 'eliminar_recurrente', { p_id: x.id }); toast('Eliminado.', 'ok'); refrescar(); }
@@ -166,7 +183,7 @@ export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar 
           }));
       }),
       h('div', { class: 'acciones' },
-        h('button', { class: 'btn', type: 'button', onclick: () => formulario({ empresa, cuentas, terceros, clave, alGuardar: refrescar }) }, '+ Nuevo movimiento recurrente')));
+        h('button', { class: 'btn', type: 'button', onclick: () => formulario({ empresa, cuentas, terceros, clave, alGuardar: refrescar, auxDatos }) }, '+ Nuevo movimiento recurrente')));
   }
   cerrar = modal('Movimientos recurrentes', cuerpo);
   cargar();
