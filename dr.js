@@ -1,0 +1,269 @@
+// Declaración de Renta (persona natural): formulario de la DGI con los renglones 1 a 128,
+// vista anual. Cada cuenta del catálogo se asigna a un renglón (Catálogo > Renglón de la
+// declaración, o desde la observación al pie de esta pantalla). Cualquier línea se puede
+// escribir a mano (lápiz). Totales, impuestos y deducciones calculadas: etapa posterior.
+import {
+  db, h, mostrar, toast, modal, campo, texto, traducirError, cargando,
+  marcoEmpresa, cargarEmpresa, hoy
+} from './lib.js';
+import { barraExportar } from './informes.js';
+import { n2 } from './exportar.js';
+
+const NUM = (v) => Number(v || 0);
+const TIPOS = {
+  activo: 'Activo', pasivo: 'Pasivo', patrimonio: 'Patrimonio', ingreso: 'Ingreso',
+  costo: 'Costo', gasto: 'Gasto', extraordinario: 'Extraordinario'
+};
+
+// Especificaciones para Excel y PDF
+function specsRenta({ filas, base, obs, anio, empresa }) {
+  const sub = `Persona natural · Año ${anio} · Sector o Clase: NATURAL · D.E. 251 Estado de Emergencia Nacional: NO`;
+  const f = filas.map((x) => {
+    if (x.fila === 'seccion') return { c: [x.descripcion, null, null, null], e: 'grupo' };
+    const monto = x.manual ? NUM(x.monto) : (x.fila === 'captura' && x.cuentas > 0 ? NUM(x.monto) : null);
+    return { c: [x.descripcion + (x.manual ? ' (manual)' : ''), x.renglon == null ? '' : String(x.renglon), x.anexos || '', monto], e: x.fila === 'calculo' ? 'total' : 'normal' };
+  });
+  const out = [{
+    titulo: `Declaración de Renta ${anio}`,
+    subtitulo: sub,
+    hoja: 'Declaración',
+    columnas: [{ t: 'Descripción', w: 6 }, { t: 'Renglón', w: 1 }, { t: 'Anexo', w: 1 }, { t: 'Monto', num: true }],
+    filas: f,
+    notas: ['Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre.',
+      'Los renglones resaltados son de fórmula y quedan sin monto hasta la siguiente etapa, salvo los escritos a mano.',
+      'Las líneas marcadas (manual) tienen un monto escrito a mano que reemplaza al de las cuentas. Los renglones "Menos:" van en positivo.']
+  }];
+  const det = base.filter((b) => b.valido && b.renglon != null)
+    .sort((a, b) => a.renglon - b.renglon || String(a.numero).localeCompare(String(b.numero), 'es', { numeric: true }));
+  const manuales = filas.filter((x) => x.manual);
+  if (det.length || manuales.length) {
+    out.push({
+      titulo: `Detalle por renglón ${anio}`,
+      subtitulo: 'Cuentas que forman cada renglón',
+      hoja: 'Detalle por renglón',
+      columnas: [{ t: 'Renglón', w: 1 }, { t: 'Cuenta', w: 6 }, { t: 'Anexo', w: 1 }, { t: 'Monto', num: true }],
+      filas: [
+        ...det.map((b) => ({ c: [String(b.renglon), `${b.numero} ${b.nombre}`, b.anexo || '', montoCuenta(b, filas)], e: 'normal' })),
+        ...manuales.map((x) => ({ c: [x.renglon == null ? '' : String(x.renglon), `Monto manual: ${x.descripcion}${x.nota ? ' · ' + x.nota : ''}`, '', NUM(x.monto)], e: 'total' }))
+      ]
+    });
+  }
+  if (obs.length) {
+    out.push({
+      titulo: `Cuentas sin renglón ${anio}`,
+      subtitulo: 'Observación: cuentas del catálogo por asignar o revisar',
+      hoja: 'Sin renglón',
+      columnas: [{ t: 'Cuenta', w: 5 }, { t: 'Tipo', w: 1.5 }, { t: 'Saldo', num: true }, { t: 'Observación', w: 4 }],
+      filas: obs.map((o) => ({ c: [`${o.numero} ${o.nombre}`, TIPOS[o.tipo] || o.tipo, NUM(o.saldo), o.motivo], e: 'normal' }))
+    });
+  }
+  return out;
+}
+
+// Monto de una cuenta dentro de su renglón (según el lado del renglón)
+function montoCuenta(b, filas) {
+  const r = filas.find((x) => x.renglon === b.renglon);
+  const lado = r && r.lado === 'C' ? -1 : 1;
+  return NUM(b.dc) * lado;
+}
+
+export async function vistaRenta(id) {
+  mostrar(marcoEmpresa({ id, razon_social: '…' }, 'renta', cargando()));
+  const empresa = await cargarEmpresa(id);
+  const puedeAsignar = empresa.rol === 'admin' || empresa.rol === 'contador';
+  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set() };
+  const cuerpo = h('div');
+  const anio = h('input', {
+    type: 'number', min: '2000', max: '2100', inputmode: 'numeric', value: String(est.anio),
+    onchange: (e) => { const v = Number(e.target.value); if (v >= 2000 && v <= 2100) { est.anio = v; est.marcadas.clear(); cargar(); } }
+  });
+
+  async function cargar() {
+    cuerpo.replaceChildren(cargando());
+    try {
+      const [d, b, o, pl] = await Promise.all([
+        db.rpc('dr_declaracion', { p_empresa: id, p_anio: est.anio }),
+        db.rpc('dr_base', { p_empresa: id, p_anio: est.anio }),
+        db.rpc('dr_sin_renglon', { p_empresa: id, p_anio: est.anio }),
+        db.from('dr_plantilla').select('renglon, lado, tipos').eq('formulario', 'natural').not('renglon', 'is', null)
+      ]);
+      for (const r of [d, b, o, pl]) if (r.error) throw r.error;
+      const lados = new Map((pl.data || []).map((x) => [x.renglon, x]));
+      est.filas = (d.data || []).map((x) => ({ ...x, lado: lados.has(x.renglon) ? lados.get(x.renglon).lado : null }));
+      est.base = b.data || [];
+      est.obs = o.data || [];
+      pintar();
+    } catch (e) {
+      est.filas = []; est.base = []; est.obs = [];
+      cuerpo.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null,
+        /dr_declaracion|dr_base|dr_plantilla/.test(String(e && e.message))
+          ? 'Falta ejecutar el script 81 en Supabase (Declaración de renta).' : traducirError(e))));
+    }
+  }
+
+  function detalleRenglon(f) {
+    const cuentas = est.base.filter((b) => b.valido && b.renglon === f.renglon)
+      .sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'es', { numeric: true }));
+    const filas = cuentas.map((b) => h('tr', null,
+      h('td', null, `${b.numero} ${b.nombre}`), h('td', null, b.anexo || ''),
+      h('td', { class: 'num' }, n2(montoCuenta(b, est.filas)))));
+    modal(`Renglón ${f.renglon} · ${f.descripcion}`, h('div', null,
+      f.manual ? h('p', { class: 'ayuda' }, `Esta línea tiene un monto manual de ${n2(f.monto)} que reemplaza a las cuentas.`) : null,
+      cuentas.length
+        ? h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla' },
+          h('thead', null, h('tr', null, h('th', null, 'Cuenta'), h('th', null, 'Anexo'), h('th', { class: 'num' }, 'Monto'))),
+          h('tbody', null, filas),
+          h('tfoot', null, h('tr', null, h('td', null, 'Total del renglón'), h('td', null, ''), h('td', { class: 'num' }, n2(f.monto_auto))))))
+        : h('p', { class: 'ayuda' }, 'Ninguna cuenta tiene este renglón todavía. Asígnalo en Catálogo o desde la observación al pie.')));
+  }
+
+  function editarMonto(f) {
+    const monto = h('input', { type: 'number', step: '0.01', inputmode: 'decimal', placeholder: '0.00',
+      value: f.manual ? String(f.monto) : '' });
+    const nota = h('input', { type: 'text', maxlength: '200', placeholder: 'Nota (opcional)', value: f.nota || '' });
+    let cerrar;
+    async function guardar(ev, quitar) {
+      if (ev) ev.preventDefault();
+      let v = null;
+      if (!quitar) {
+        if (monto.value === '' || !isFinite(Number(monto.value))) { toast('Escribe el monto.', 'error'); return; }
+        v = Number(monto.value);
+      }
+      const { error } = await db.rpc('dr_guardar_manual', {
+        p_empresa: id, p_anio: est.anio, p_orden: f.orden, p_monto: v, p_nota: quitar ? null : texto(nota.value)
+      });
+      if (error) { toast(traducirError(error), 'error'); return; }
+      toast(quitar ? 'Vuelve al monto de las cuentas.' : 'Monto guardado.', 'ok');
+      cerrar();
+      await cargar();
+    }
+    cerrar = modal(f.renglon == null ? f.descripcion : `Renglón ${f.renglon} · ${f.descripcion}`,
+      h('form', { onsubmit: (ev) => guardar(ev, false) },
+        f.fila === 'captura'
+          ? h('p', { class: 'ayuda' }, `Según las cuentas: ${n2(f.monto_auto)}. Si escribes un monto aquí, reemplaza al de las cuentas para ${est.anio}.`)
+          : h('p', { class: 'ayuda' }, `Este renglón saldrá de una fórmula. Puedes escribir el monto a mano para ${est.anio}.`),
+        campo('Monto (B/.)', monto),
+        campo('Nota', nota),
+        h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
+        f.manual ? h('button', { class: 'btn btn-sec btn-bloque', type: 'button', style: 'margin-top: 10px', onclick: () => guardar(null, true) },
+          'Volver al monto automático') : null));
+  }
+
+  function filaTabla(f) {
+    if (f.fila === 'seccion') {
+      return h('tr', { class: 'dr-seccion' }, h('td', { colspan: '4' }, f.descripcion));
+    }
+    const clic = f.fila === 'captura' && f.cuentas > 0;
+    const hay = f.manual || (f.fila === 'captura' && f.cuentas > 0);
+    const lapiz = puedeAsignar
+      ? h('button', { class: 'dr-lapiz' + (f.manual ? ' activo' : ''), type: 'button', 'aria-label': 'Editar monto',
+        onclick: (ev) => { ev.stopPropagation(); editarMonto(f); } }, '✎')
+      : null;
+    return h('tr', { class: 'dr-fila' + (f.fila === 'calculo' ? ' dr-calculo' : '') + (clic ? ' dr-clic' : ''),
+      onclick: clic ? () => detalleRenglon(f) : null },
+      h('td', null, f.descripcion, f.manual && f.nota ? h('div', { class: 'ayuda' }, f.nota) : null),
+      h('td', { class: 'centro' }, f.renglon == null ? '' : h('span', { class: 'dr-pildora' }, String(f.renglon))),
+      h('td', { class: 'centro' }, f.anexos || ''),
+      h('td', { class: 'num' + (f.manual ? ' dr-manual' : '') }, hay ? n2(f.monto) : '', lapiz));
+  }
+
+  function asignar(cuentas) {
+    const sugerido = cuentas.length === 1 ? sugerirRenglon(cuentas[0]) : '';
+    const caps = est.filas.filter((x) => x.fila === 'captura');
+    const secciones = [];
+    for (const x of caps) {
+      let g = secciones.find((s) => s.t === x.seccion);
+      if (!g) { g = { t: x.seccion, items: [] }; secciones.push(g); }
+      g.items.push(x);
+    }
+    const sel = h('select', null,
+      h('option', { value: '' }, 'Elige un renglón...'),
+      secciones.map((s) => h('optgroup', { label: s.t }, s.items.map((x) =>
+        h('option', { value: String(x.renglon) }, `${x.renglon} · ${x.descripcion}`)))));
+    if (sugerido) sel.value = String(sugerido);
+    const anexo = h('input', { type: 'text', placeholder: 'Número de anexo (opcional)' });
+    let cerrar;
+    async function guardar(ev) {
+      ev.preventDefault();
+      if (!sel.value) { toast('Elige el renglón.', 'error'); return; }
+      const datos = { linea_dr: sel.value };
+      if (texto(anexo.value)) { datos.anexo_dr = texto(anexo.value); datos.lleva_anexo = true; }
+      const { data, error } = await db.from('cuentas').update(datos).in('id', cuentas.map((c) => c.cuenta_id)).select('id');
+      if (error) { toast(traducirError(error), 'error'); return; }
+      if (!data || data.length === 0) { toast('No se pudo guardar: revisa tu permiso.', 'error'); return; }
+      toast(`Renglón ${sel.value} asignado a ${data.length} cuenta(s).`, 'ok');
+      est.marcadas.clear();
+      cerrar();
+      await cargar();
+    }
+    cerrar = modal(cuentas.length === 1 ? `${cuentas[0].numero} · Renglón` : `Asignar renglón a ${cuentas.length} cuentas`,
+      h('form', { onsubmit: guardar },
+        h('p', { class: 'ayuda' }, cuentas.length === 1
+          ? `${cuentas[0].numero} ${cuentas[0].nombre} (${TIPOS[cuentas[0].tipo] || cuentas[0].tipo})`
+          : cuentas.slice(0, 6).map((c) => c.numero).join(', ') + (cuentas.length > 6 ? '...' : '')),
+        campo('Renglón de la declaración', sel),
+        campo('Anexo', anexo),
+        h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar')));
+  }
+
+  // Sugerencia sencilla según el tipo de cuenta (solo preselecciona; la persona decide)
+  function sugerirRenglon(c) {
+    const por = { ingreso: 14, gasto: 58, activo: 75, pasivo: 80, patrimonio: 82 };
+    return por[c.tipo] || '';
+  }
+
+  function bloqueObservacion() {
+    const conMov = est.obs.filter((o) => o.movimientos > 0 || NUM(o.saldo) !== 0);
+    const lista = est.sinMov ? est.obs : conMov;
+    const check = h('input', { type: 'checkbox', checked: est.sinMov,
+      onchange: (e) => { est.sinMov = e.target.checked; pintar(); } });
+    const marcadas = est.obs.filter((o) => est.marcadas.has(o.cuenta_id));
+    return h('div', { class: 'tarjeta' },
+      h('h3', null, est.obs.length ? `Observación: ${conMov.length} cuenta(s) con movimiento sin renglón` : 'Observación'),
+      est.obs.length === 0
+        ? h('p', { class: 'ayuda' }, 'Todas las cuentas del catálogo tienen un renglón válido.')
+        : h('div', null,
+          h('p', { class: 'ayuda' }, `Estas cuentas del catálogo no tienen un renglón de la declaración, o lo tienen mal puesto. ${puedeAsignar ? 'Toca una para asignarlo, o márcalas y asigna el mismo renglón a varias.' : 'Pídele al administrador o al contador que las asigne.'} Salen solas de esta lista cuando se les asigna.`),
+          h('label', { class: 'fila-check' }, check, h('span', null, `Mostrar también las cuentas sin movimiento (${est.obs.length - conMov.length})`)),
+          puedeAsignar && marcadas.length
+            ? h('button', { class: 'btn btn-bloque', type: 'button', onclick: () => asignar(marcadas) }, `Asignar renglón a las ${marcadas.length} marcadas`)
+            : null,
+          lista.length === 0 ? h('p', { class: 'ayuda' }, 'No hay cuentas con movimiento sin renglón.') :
+            h('div', { class: 'dr-obs' }, lista.map((o) => h('div', { class: 'dr-obs-fila' },
+              puedeAsignar ? h('input', { type: 'checkbox', checked: est.marcadas.has(o.cuenta_id),
+                onchange: (e) => { if (e.target.checked) est.marcadas.add(o.cuenta_id); else est.marcadas.delete(o.cuenta_id); pintar(); } }) : null,
+              h('button', { class: 'dr-obs-dato', type: 'button', disabled: !puedeAsignar, onclick: () => asignar([o]) },
+                h('span', { class: 'num' }, o.numero),
+                h('span', null, o.nombre),
+                h('span', { class: 'ayuda' }, `${TIPOS[o.tipo] || o.tipo} · ${n2(o.saldo)} · ${o.motivo}`)))))));
+  }
+
+  function pintar() {
+    const tabla = h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla dr-tabla' },
+      h('thead', null, h('tr', null, h('th', null, 'Descripción'), h('th', { class: 'centro' }, 'Renglón'),
+        h('th', { class: 'centro' }, 'Anexo'), h('th', { class: 'num' }, 'Monto'))),
+      h('tbody', null, est.filas.map(filaTabla))));
+    cuerpo.replaceChildren(
+      h('div', { class: 'tarjeta dr-cabecera' },
+        h('div', null, h('span', { class: 'ayuda' }, 'Formulario'), h('strong', null, 'Persona natural')),
+        h('div', null, h('span', { class: 'ayuda' }, 'Sector o Clase'), h('strong', { class: 'dr-cursiva' }, 'NATURAL')),
+        h('div', null, h('span', { class: 'ayuda' }, 'D.E. 251 Estado de Emergencia Nacional'), h('strong', { class: 'dr-cursiva' }, 'NO'))),
+      h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre. Toca un renglón con monto para ver sus cuentas. El lápiz ✎ permite escribir el monto a mano (reemplaza al de las cuentas y se puede quitar). Los renglones resaltados son de fórmula y todavía no tienen monto, salvo los que escribas a mano. Los renglones "Menos:" van en positivo.'),
+      tabla,
+      bloqueObservacion());
+  }
+
+  mostrar(marcoEmpresa(empresa, 'renta', [
+    h('div', { class: 'filtros' }, h('label', null, 'Año', anio)),
+    barraExportar({
+      empresa,
+      obtener: () => (est.filas.length
+        ? { specs: specsRenta({ filas: est.filas, base: est.base, obs: est.obs, anio: est.anio, empresa }),
+          archivo: `${empresa.razon_social}-declaracion-renta-${est.anio}` }
+        : null)
+    }),
+    cuerpo]));
+  await cargar();
+}
+
+// FIN DEL ARCHIVO dr.js

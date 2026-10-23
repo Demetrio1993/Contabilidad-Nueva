@@ -10,6 +10,7 @@ import { vistaEstados } from './estados.js';
 import { vistaCierre } from './cierre.js';
 import { vistaPresupuesto } from './presupuesto.js';
 import { vistaImpuestos } from './fiscal.js';
+import { vistaRenta } from './dr.js';
 import { vistaCartera } from './cartera.js';
 import { vistaActivos } from './activos.js';
 import { vistaConciliacion } from './conciliacion.js';
@@ -273,6 +274,7 @@ async function vistaCatalogo(id) {
         h('span', { class: 'num' }, c.numero),
         h('span', null, c.nombre),
         h('span', { class: 'insignias' },
+          c.linea_dr ? h('span', { class: 'insignia' }, `Renglón ${c.linea_dr}`) : null,
           c.lleva_anexo ? h('span', { class: 'insignia' + (c.anexo_dr && c.linea_dr ? '' : ' aviso') },
             c.anexo_dr ? `Anexo ${c.anexo_dr}` : 'Anexo') : null,
           h('span', { class: 'insignia gris' }, c.naturaleza === 'deudora' ? 'D' : 'A')))));
@@ -295,13 +297,17 @@ async function vistaCatalogo(id) {
     const mov = h('input', { type: 'checkbox', checked: c.acepta_movimientos });
     const anexo = h('input', { type: 'checkbox', checked: c.lleva_anexo });
     const anexoNum = h('input', { type: 'text', value: c.anexo_dr ?? '', placeholder: 'Número de anexo' });
-    const linea = h('input', { type: 'text', value: c.linea_dr ?? '', placeholder: 'Línea de la declaración' });
+    const linea = h('input', { type: 'text', value: c.linea_dr ?? '', placeholder: 'Número de renglón (1 a 128)', inputmode: 'numeric' });
     const activa = h('input', { type: 'checkbox', checked: c.activa });
     let cerrar;
 
     async function guardar(ev) {
       ev.preventDefault();
       if (!texto(nombre.value)) { toast('Escribe el nombre de la cuenta.', 'error'); return; }
+      const rg = texto(linea.value);
+      if (rg && !(/^[0-9]{1,3}$/.test(rg) && Number(rg) >= 1 && Number(rg) <= 128)) {
+        toast('El renglón debe ser un número del 1 al 128.', 'error'); return;
+      }
       const datos = {
         nombre: texto(nombre.value),
         naturaleza: naturaleza.value,
@@ -315,7 +321,7 @@ async function vistaCatalogo(id) {
       const { error } = await db.from('cuentas').update(datos).eq('id', c.id);
       if (error) { toast(traducirError(error), 'error'); return; }
       if (datos.lleva_anexo && (!datos.anexo_dr || !datos.linea_dr)) {
-        toast('Guardado. Falta completar el anexo o la línea.', 'info');
+        toast('Guardado. Falta completar el anexo o el renglón.', 'info');
       } else {
         toast('Cuenta guardada.', 'ok');
       }
@@ -341,10 +347,10 @@ async function vistaCatalogo(id) {
       h('label', { class: 'fila-check' }, mov, h('span', null, 'Acepta movimientos')),
       h('div', { class: 'grupo' },
         h('h3', null, 'Declaración de renta (DGI)'),
-        h('p', { class: 'ayuda' }, 'Se llena a mano para esta empresa, según su actividad. Alimenta los anexos de la renta.'),
+        h('p', { class: 'ayuda' }, 'Se llena a mano para esta empresa. El renglón (1 a 128) reúne los movimientos de la cuenta en la pestaña Declaración de renta; una cuenta con renglón cubre también las que están dentro de ella. El anexo alimenta los anexos de la renta.'),
         h('label', { class: 'fila-check' }, anexo, h('span', null, 'Esta cuenta lleva anexo')),
         campo('Número de anexo', anexoNum),
-        campo('Línea de la declaración', linea)),
+        campo('Renglón de la declaración (número)', linea)),
       bloqueAuxiliaresCuenta({ empresaId: id, rol: empresa.rol, cuenta: c }),
       h('label', { class: 'fila-check' }, activa, h('span', null, 'Cuenta activa')),
       h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
@@ -363,7 +369,7 @@ async function vistaCatalogo(id) {
     const mov = h('input', { type: 'checkbox' });
     const anexo = h('input', { type: 'checkbox' });
     const anexoNum = h('input', { type: 'text', placeholder: 'Número de anexo' });
-    const linea = h('input', { type: 'text', placeholder: 'Línea de la declaración' });
+    const linea = h('input', { type: 'text', placeholder: 'Número de renglón (1 a 128)', inputmode: 'numeric' });
     const info = h('p', { class: 'ayuda' });
     let cerrar;
 
@@ -423,7 +429,7 @@ async function vistaCatalogo(id) {
         h('h3', null, 'Declaración de renta (DGI)'),
         h('label', { class: 'fila-check' }, anexo, h('span', null, 'Esta cuenta lleva anexo')),
         campo('Número de anexo', anexoNum),
-        campo('Línea de la declaración', linea)),
+        campo('Renglón de la declaración (número)', linea)),
       h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Agregar cuenta')));
     alElegirPadre();
   }
@@ -471,6 +477,7 @@ async function render() {
       else if (p[2] === 'cierre') await vistaCierre(id);
       else if (p[2] === 'presupuesto') await vistaPresupuesto(id);
       else if (p[2] === 'impuestos') await vistaImpuestos(id);
+      else if (p[2] === 'renta') await vistaRenta(id);
       else if (p[2] === 'cartera') await vistaCartera(id);
       else if (p[2] === 'activos') await vistaActivos(id);
       else if (p[2] === 'conciliacion') await vistaConciliacion(id);

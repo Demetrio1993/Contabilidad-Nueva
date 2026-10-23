@@ -151,7 +151,7 @@ async function seccionAnexos(id, empresa, zona) {
       const bloques = [];
       if (faltan.length) {
         bloques.push(h('div', { class: 'aviso-lectura' },
-          h('strong', null, `${faltan.length} cuenta(s) con anexo sin número o línea.`),
+          h('strong', null, `${faltan.length} cuenta(s) con anexo sin número o renglón.`),
           h('p', null, faltan.map((x) => `${x.cuenta_numero} ${x.cuenta_nombre}`).join('; ') + '. Complétalas en Catálogo.')));
       }
       if (sinMarca.length) {
@@ -163,7 +163,7 @@ async function seccionAnexos(id, empresa, zona) {
       } else {
         const filas = []; let clave = null;
         for (const x of est.det) {
-          const k = `Anexo ${x.anexo || 'sin asignar'} · línea ${x.linea || 'sin asignar'}`;
+          const k = `Anexo ${x.anexo || 'sin asignar'} · renglón ${x.linea || 'sin asignar'}`;
           if (k !== clave) { clave = k; filas.push({ c: [k, '', null, null, null], e: 'grupo' }); }
           filas.push({ c: [`${x.cuenta_numero} ${x.cuenta_nombre}`, nombreTercero(x), NUM(x.facturas), NUM(x.monto), NUM(x.itbms)], e: 'normal' });
         }
@@ -189,12 +189,12 @@ async function seccionAnexos(id, empresa, zona) {
   await pintar();
 }
 
-// Especificación limpia (5 columnas) con subtotales por anexo y línea
+// Especificación limpia (5 columnas) con subtotales por anexo y renglón
 function specsAnexos2(det, pend, anio) {
   const filas = []; let clave = null; let t = [0, 0, 0];
   const cerrar = () => { if (clave !== null) filas.push({ c: ['Total ' + clave, null, String(t[0]), t[1], t[2]], e: 'n1' }); };
   for (const x of det) {
-    const k = `anexo ${x.anexo || 'sin asignar'}, línea ${x.linea || 'sin asignar'}`;
+    const k = `anexo ${x.anexo || 'sin asignar'}, renglón ${x.linea || 'sin asignar'}`;
     if (k !== clave) { cerrar(); clave = k; t = [0, 0, 0]; filas.push({ c: [k.charAt(0).toUpperCase() + k.slice(1), null, null, null, null], e: 'grupo' }); }
     filas.push({ c: [`${x.cuenta_numero} ${x.cuenta_nombre}`, nombreTercero(x), String(NUM(x.facturas)), NUM(x.monto), NUM(x.itbms)], e: 'normal' });
     t[0] += NUM(x.facturas); t[1] += NUM(x.monto); t[2] += NUM(x.itbms);
@@ -204,7 +204,7 @@ function specsAnexos2(det, pend, anio) {
   if (filas.length) {
     out.push({
       titulo: `Anexos de la declaración de renta ${anio}`,
-      subtitulo: 'Detalle por anexo y línea, con cliente o proveedor',
+      subtitulo: 'Detalle por anexo y renglón, con cliente o proveedor',
       hoja: 'Anexos DR',
       columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Cliente o proveedor', w: 1 }, { t: 'Facturas', num: true },
         { t: 'Monto', num: true }, { t: 'ITBMS', num: true }],
@@ -218,10 +218,10 @@ function specsAnexos2(det, pend, anio) {
       titulo: `Cuentas de resultado y su anexo ${anio}`,
       subtitulo: 'Revisión de configuración',
       hoja: 'Configuración',
-      columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Anexo' }, { t: 'Línea' }, { t: 'Movimiento', num: true }, { t: 'Estado' }],
+      columnas: [{ t: 'Cuenta', w: 1 }, { t: 'Anexo' }, { t: 'Renglón' }, { t: 'Movimiento', num: true }, { t: 'Estado' }],
       filas: pend.map((p) => ({
         c: [`${p.cuenta_numero} ${p.cuenta_nombre}`, p.anexo || '', p.linea || '', NUM(p.movimiento),
-          p.falta_config ? 'Falta anexo o línea' : (p.lleva_anexo ? 'Configurada' : 'No lleva anexo')],
+          p.falta_config ? 'Falta anexo o renglón' : (p.lleva_anexo ? 'Configurada' : 'No lleva anexo')],
         e: p.falta_config ? 'total' : 'normal'
       }))
     });
