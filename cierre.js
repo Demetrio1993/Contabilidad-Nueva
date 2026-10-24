@@ -23,7 +23,7 @@ export async function vistaCierre(id) {
   /* ------------------------------ datos ------------------------------ */
   async function cargar() {
     const anio = est.anio;
-    const [per, cie, prev, cierre, cuentas] = await Promise.all([
+    const [per, cie, prev, cierre, cuentas, imp] = await Promise.all([
       db.from('periodos').select('mes, estado, cerrado_en').eq('empresa_id', id).eq('anio', anio),
       db.from('cierres_anuales').select('total_ingresos, total_costos_gastos, utilidad_neta, retiros_cerrados, cerrado_en')
         .eq('empresa_id', id).eq('anio', anio).maybeSingle(),
@@ -34,9 +34,10 @@ export async function vistaCierre(id) {
         .order('consecutivo').range(0, 999),
       db.from('cuentas').select('id, numero, nombre, nivel')
         .eq('empresa_id', id).eq('acepta_movimientos', true).eq('activa', true)
-        .order('numero').range(0, 4999)
+        .order('numero').range(0, 4999),
+      db.rpc('impuestos_calculo', { p_empresa: id, p_anio: anio })
     ]);
-    for (const r of [per, cie, prev, cierre, cuentas]) if (r.error) throw r.error;
+    for (const r of [per, cie, prev, cierre, cuentas, imp]) if (r.error) throw r.error;
     const cerrado = cie.data || null;
     let apertura = [];
     if (cerrado) {
@@ -46,7 +47,7 @@ export async function vistaCierre(id) {
     }
     return {
       periodos: new Map((per.data || []).map((p) => [Number(p.mes), p])),
-      cerrado, preview: prev.data || [], asientos: cierre.data || [], cuentas: cuentas.data || [], apertura
+      cerrado, impuestos: (imp.data || [])[0] || null, preview: prev.data || [], asientos: cierre.data || [], cuentas: cuentas.data || [], apertura
     };
   }
 
@@ -138,6 +139,69 @@ export async function vistaCierre(id) {
       }));
   }
 
+  /* ------------------------ impuestos del año (automático) ------------------------ */
+  function tarjetaImpuestos(d) {
+    const x = d.impuestos;
+    if (!x) return h('div');
+    const anio = est.anio;
+    const fila = (t, v, fuerte) => h('tr', { class: fuerte ? 'fila-total' : null },
+      h('td', null, t), h('td', { class: 'num' }, dinero(v)));
+    const tabla = h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
+      h('thead', null, h('tr', null, h('th', null, 'Concepto'), h('th', { class: 'num' }, 'Monto'))),
+      h('tbody', null,
+        fila('Renta gravable (utilidad antes de impuestos)', x.utilidad_antes),
+        fila(`Seguro educativo (${(NUM(x.tasa) * 100).toFixed(2)} % de la renta gravable${NUM(x.tope) > 0 ? ', base máxima ' + dinero(x.tope) : ''})`, NUM(x.se_manual) + NUM(x.se_auto)),
+        fila(x.isr_es_manual ? 'Impuesto sobre la renta (monto escrito a mano)' : 'Impuesto sobre la renta (tabla de persona natural)', NUM(x.isr_manual) + NUM(x.isr_auto)),
+        fila('Utilidad neta (pasa al balance general)', x.utilidad_neta, true))));
+    const nodos = [h('h2', null, `Impuestos del año ${anio}`)];
+    if (!x.aplica) {
+      nodos.push(h('p', { class: 'ayuda' }, x.tipo_persona === 'natural'
+        ? 'El ajuste automático está apagado para esta empresa.'
+        : 'El seguro educativo automático solo aplica a personas naturales.'));
+    } else {
+      nodos.push(h('p', { class: 'ayuda' },
+        'El sistema crea solo el asiento del 31 de diciembre: debita Utilidad (pérdida) del ejercicio y acredita Impuesto sobre la renta por pagar (auxiliar S001 para el seguro educativo). Lo recalcula con cada cambio de la contabilidad. ISR: hasta 11,000.00 exento; de 11,000.01 a 50,000.00, 15 % del excedente de 11,000.00; más de 50,000.00, 5,850.00 más 25 % del excedente de 50,000.00. El año cerrado ya no cambia.'));
+    }
+    nodos.push(tabla);
+    if (x.asiento_consecutivo) nodos.push(h('p', { class: 'ayuda' }, `Asiento automático N.º ${x.asiento_consecutivo} en el Diario, referencia AJ-IMP-${anio}.`));
+    if (x.aplica && !x.cerrado) {
+      const isr = h('input', { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', value: String(NUM(x.isr_objetivo)) });
+      const guardar = h('button', { class: 'btn btn-sec btn-peq', type: 'button' }, 'Guardar monto escrito');
+      guardar.addEventListener('click', async () => {
+        const v = Number(isr.value);
+        if (!(v >= 0)) { toast('Escribe un monto válido.', 'error'); return; }
+        guardar.disabled = true;
+        const { error } = await db.rpc('impuestos_guardar_isr', { p_empresa: id, p_anio: anio, p_isr: v, p_nota: null });
+        guardar.disabled = false;
+        if (error) { toast(traducirError(error), 'error'); return; }
+        toast('Impuesto sobre la renta guardado.', 'ok');
+        pintar();
+      });
+      const volverAuto = h('button', { class: 'btn btn-sec btn-peq', type: 'button' }, 'Volver al cálculo automático');
+      volverAuto.addEventListener('click', async () => {
+        volverAuto.disabled = true;
+        const { error } = await db.rpc('impuestos_guardar_isr', { p_empresa: id, p_anio: anio, p_isr: null, p_nota: null });
+        volverAuto.disabled = false;
+        if (error) { toast(traducirError(error), 'error'); return; }
+        toast('Impuesto sobre la renta automático.', 'ok');
+        pintar();
+      });
+      const recalcular = h('button', { class: 'btn btn-sec btn-peq', type: 'button' }, 'Recalcular ahora');
+      recalcular.addEventListener('click', async () => {
+        recalcular.disabled = true;
+        const { error } = await db.rpc('impuestos_recalcular_ahora', { p_empresa: id, p_anio: anio });
+        recalcular.disabled = false;
+        if (error) { toast(traducirError(error), 'error'); return; }
+        toast('Impuestos recalculados.', 'ok');
+        pintar();
+      });
+      nodos.push(
+        h('label', { class: 'campo' }, h('span', null, `Impuesto sobre la renta de ${anio} (B/.): escribe un monto solo si quieres cambiar el cálculo automático`), isr),
+        h('div', { class: 'acciones' }, guardar, x.isr_es_manual ? volverAuto : null, recalcular));
+    }
+    return h('div', { class: 'tarjeta' }, nodos);
+  }
+
   /* ------------------------------ cierre anual ------------------------------ */
   function tablaPrevia(d) {
     return h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
@@ -197,17 +261,17 @@ export async function vistaCierre(id) {
     });
     return h('div', { class: 'tarjeta' },
       h('h2', null, `Cierre anual ${anio}`),
-      h('p', { class: 'ayuda' }, 'Orden de trabajo: 1) registra todos los ajustes del año, incluido el impuesto sobre la renta, con fecha 31 de diciembre; 2) revisa la vista previa; 3) cierra el año; 4) prepara los estados financieros.'),
+      h('p', { class: 'ayuda' }, 'Orden de trabajo: 1) registra todos los ajustes del año; el seguro educativo y el impuesto sobre la renta los asienta el sistema al 31 de diciembre (el ISR sale de la tabla de persona natural y se puede cambiar en la tarjeta de arriba); 2) revisa la vista previa; 3) imprime los informes; 4) cierra el año. Al cerrar, ingresos, costos y gastos empiezan el año siguiente en cero y activos, pasivos y capital pasan con su saldo.'),
       h('div', { class: 'acciones' },
         h('button', {
           class: 'btn btn-sec', type: 'button',
           onclick: () => abrirAjuste(id, d.cuentas, `${anio}-12-31`, pintar)
-        }, '+ Asiento de ajuste (ISR u otros)')),
+        }, '+ Asiento de ajuste (otros)')),
       h('h3', null, 'Vista previa de lo que se cierra'),
       tablaPrevia(d),
       h('label', { class: 'fila-check' }, retiros, h('span', null, 'Cerrar los retiros del propietario contra utilidades acumuladas')),
       h('label', { class: 'fila-check' }, trasladar, h('span', null, 'Trasladar la utilidad del ejercicio a utilidades acumuladas')),
-      h('label', { class: 'fila-check' }, confirmo, h('span', null, `Confirmo que ya registré todos los ajustes de ${anio}, incluido el impuesto sobre la renta.`)),
+      h('label', { class: 'fila-check' }, confirmo, h('span', null, `Confirmo que ya registré todos los ajustes de ${anio}, revisé el impuesto sobre la renta e imprimí los informes.`)),
       h('div', { class: 'acciones' }, cerrar));
   }
 
@@ -222,7 +286,7 @@ export async function vistaCierre(id) {
           empresa,
           obtener: () => (est.datos ? { specs: specs(est.datos), archivo: `${empresa.razon_social}-cierre-${est.anio}` } : null)
         })),
-        tarjetaVerificacion({ empresa, anio: est.anio }), seccionAnual(d), seccionMensual(d));
+        tarjetaVerificacion({ empresa, anio: est.anio }), tarjetaImpuestos(d), seccionAnual(d), seccionMensual(d));
     } catch (e) {
       est.datos = null;
       zona.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null, traducirError(e))));

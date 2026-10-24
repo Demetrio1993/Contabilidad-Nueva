@@ -11,7 +11,7 @@ import { cargarAuxiliares, campoAuxiliar, etiquetaAux, formularioAuxiliar, infor
 const ORIGENES = {
   manual: 'Manual', ajuste: 'Ajuste', apertura: 'Apertura', transaccion: 'Transacción',
   depreciacion: 'Depreciación', amortizacion: 'Amortización', inventario: 'Inventario',
-  conciliacion: 'Conciliación', cierre: 'Cierre'
+  conciliacion: 'Conciliación', cierre: 'Cierre', impuestos: 'Impuestos'
 };
 
 const INFORMES = [
@@ -349,7 +349,9 @@ export async function vistaInformes(id) {
       .order('fecha').order('consecutivo').range(0, 4999);
     if (error) throw error;
     const cuenta = cuentas.find((c) => c.id === est.cuentaId) || { numero: '', nombre: '' };
-    const antes = data.filter((m) => m.fecha < d);
+    // las cuentas de ingresos, costos y gastos empiezan en cero cada 1 de enero
+    const nominal = /^[4-9]/.test(String(cuenta.numero));
+    const antes = data.filter((m) => m.fecha < d && (!nominal || m.fecha.slice(0, 4) === d.slice(0, 4)));
     const saldoIni = antes.length ? Number(antes[antes.length - 1].saldo) : 0;
     const movs = data.filter((m) => m.fecha >= d);
     const td = movs.reduce((s, m) => s + Number(m.debito), 0);
