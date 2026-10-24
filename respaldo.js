@@ -1,5 +1,6 @@
 // Respaldo de la empresa (pestaña Datos): descarga todos sus datos en un archivo JSON completo
-// y en un Excel legible (catálogo, diario, transacciones, clientes y proveedores).
+// y en un Excel legible: catálogo, diario, transacciones, clientes y proveedores, estados financieros, declaración de renta,
+// impuestos, anexos, cartera, activos, inventario, conciliación, presupuesto y el resto de las tablas.
 // Los archivos adjuntos (fotos y PDF) no van dentro: el respaldo incluye solo su lista.
 import { db, h, toast, traducirError, hoy, fechaCorta, irA } from './lib.js';
 import { construirXlsx, descargar } from './exportar.js';
@@ -14,7 +15,9 @@ const TABLAS = [
   ['cierres_anuales', 'empresa_id'], ['cifras_anteriores', 'empresa_id'], ['itbms_manual', 'empresa_id'],
   ['notas_eeff', 'empresa_id'], ['notas_eeff_anterior', 'empresa_id'], ['notas_detalle', 'empresa_id'],
   ['recurrentes', 'empresa_id'], ['vencimientos', 'empresa_id'], ['vencimientos_cumplidos', 'empresa_id'],
-  ['importaciones', 'empresa_id'], ['bitacora', 'empresa_id']
+  ['importaciones', 'empresa_id'], ['bitacora', 'empresa_id'],
+  ['auxiliares', 'empresa_id'], ['impuestos_config', 'empresa_id'], ['impuestos_anio', 'empresa_id'], ['dr_manual', 'empresa_id'],
+  ['dr_aprobaciones', 'empresa_id'], ['presupuestos', 'empresa_id'], ['comentarios_transaccion', 'empresa_id'], ['empresa_usuarios', 'empresa_id']
 ];
 const PAGINA = 1000;
 
@@ -47,7 +50,7 @@ export async function reunirDatos(id, progreso) {
 // Si el archivo 74 aún no se ejecutó o la empresa es muy grande, lee tabla por tabla como antes.
 export async function obtenerRespaldo(id, progreso) {
   const r = await db.rpc('exportar_empresa', { p_empresa: id });
-  if (!r.error && r.data && r.data.tablas) return { empresa: r.data.empresa, tablas: r.data.tablas, omitidas: [], completo: true };
+  if (!r.error && r.data && r.data.tablas) return { empresa: r.data.empresa, tablas: r.data.tablas, informes: r.data.informes || null, omitidas: [], completo: true };
   const d = await reunirDatos(id, progreso);
   return { ...d, completo: false };
 }
@@ -77,6 +80,127 @@ export function avisoRespaldo(empresa) {
 }
 
 const n = (v) => Number(v || 0);
+
+// ---------- Hojas adicionales del Excel: informes y el resto de las tablas ----------
+const TITULOS_COL = { fecha: 'Fecha', numero: 'Número', nombre: 'Nombre', descripcion: 'Descripción', concepto: 'Concepto', monto: 'Monto', actual: 'Actual', anterior: 'Anterior',
+  debito: 'Débito', credito: 'Crédito', saldo: 'Saldo', tipo: 'Tipo', estado: 'Estado', anio: 'Año', mes: 'Mes', renglon: 'Renglón', anexo: 'Anexo', anexos: 'Anexos' };
+const titCol = (k) => TITULOS_COL[k] || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
+
+// Convierte una lista de filas (objetos) en una hoja: resuelve cuentas y terceros y omite ids y datos anidados
+export function hojaGenerica(hoja, titulo, filas, d, sub) {
+  if (!Array.isArray(filas) || !filas.length) return null;
+  const t = (d && d.tablas) || {};
+  const porCuenta = Object.fromEntries((t.cuentas || []).map((c) => [c.id, `${c.numero} ${c.nombre}`]));
+  const porTercero = Object.fromEntries((t.terceros || []).map((x) => [x.id, x.razon_social]));
+  const porAsiento = Object.fromEntries((t.asientos || []).map((a) => [a.id, a.consecutivo]));
+  const claves = [];
+  for (const f of filas.slice(0, 20000)) for (const k of Object.keys(f)) {
+    if (!claves.includes(k) && k !== 'id' && k !== 'empresa_id' && k !== 'error') claves.push(k);
+  }
+  const PREF = ['fecha', 'mes', 'consecutivo', 'numero', 'codigo', 'renglon', 'cuenta', 'cuenta_id', 'nombre', 'concepto', 'descripcion', 'anexo', 'anexos', 'tercero', 'tercero_id',
+    'tipo', 'documento', 'debito', 'credito', 'ingreso', 'egreso', 'monto', 'actual', 'anterior', 'saldo_anterior', 'saldo'];
+  const peso = (k) => { const i = PREF.indexOf(k); return k === 'fila' ? 1000 : (i < 0 ? 500 : i); };
+  claves.sort((a, b) => peso(a) - peso(b));
+  const cols = [];
+  for (const k of claves) {
+    if (k === 'orden') continue;
+    const muestra = filas.map((f) => f[k]).find((v) => v !== null && v !== undefined);
+    if (muestra !== undefined && typeof muestra === 'object') continue;
+    if (/_id$/.test(k) && !['cuenta_id', 'tercero_id', 'asiento_id'].includes(k) && !/^(cuenta|tercero|asiento)/.test(k)) continue;
+    cols.push(k);
+  }
+  if (!cols.length) return null;
+  const esNum = (k) => filas.every((f) => f[k] === null || f[k] === undefined || typeof f[k] === 'number');
+  const valor = (f, k) => {
+    const v = f[k];
+    if (v === null || v === undefined) return '';
+    if (k === 'cuenta_id') return porCuenta[v] || '';
+    if (k === 'tercero_id') return porTercero[v] || '';
+    if (k === 'asiento_id') return porAsiento[v] === undefined ? '' : porAsiento[v];
+    if (typeof v === 'boolean') return v ? 'Sí' : '';
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return fechaCorta(v);
+    return v;
+  };
+  return {
+    titulo, subtitulo: sub || d.empresa.razon_social, hoja, horizontal: cols.length > 5,
+    columnas: cols.map((k) => ({ t: k === 'cuenta_id' ? 'Cuenta' : k === 'tercero_id' ? 'Cliente o proveedor' : k === 'asiento_id' ? 'Asiento' : titCol(k), num: esNum(k) && !/(^|_)(numero|codigo|anio|renglon)$/.test(k) })),
+    filas: filas.slice(0, 20000).map((f) => ({ c: cols.map((k) => valor(f, k)), e: 'normal' }))
+  };
+}
+
+const INFORMES_ANIO = [
+  ['estado_resultados', 'Resultados', 'Estado de resultados'], ['estado_balance_general', 'Balance', 'Balance general'],
+  ['estado_cambios_patrimonio', 'Patrimonio', 'Cambios en el patrimonio'], ['estado_flujo_efectivo', 'Flujo', 'Flujo de efectivo'],
+  ['balance_comprobacion', 'Comprobación', 'Balance de comprobación'], ['libro_ingresos_egresos', 'Libro Ing-Egr', 'Libro de Ingresos y Egresos'],
+  ['impuestos_calculo', 'Impuestos', 'Seguro educativo e impuesto sobre la renta'], ['cierre_fiscal', 'Cierre fiscal', 'Asiento de cierre fiscal sugerido'],
+  ['declaracion_renta', 'Decl. renta', 'Declaración de renta'], ['declaracion_renta_cuentas', 'Renta cuentas', 'Declaración de renta: cuentas por renglón'],
+  ['declaracion_renta_sin_renglon', 'Renta sin renglón', 'Declaración de renta: cuentas sin renglón'], ['anexos_dr', 'Anexos DR', 'Anexos de la declaración'],
+  ['anexos_dr_pendientes', 'Anexos pend.', 'Anexos pendientes'], ['depreciacion_matriz', 'Depreciación', 'Depreciación del año'],
+  ['amortizacion_matriz', 'Amortización', 'Amortización del año'], ['presupuesto_vs_real', 'Presupuesto', 'Presupuesto contra real'],
+  ['auxiliares_saldos', 'Auxiliares', 'Saldos de auxiliares']
+];
+const INFORMES_FECHA = [
+  ['cartera_cxc_detalle', 'CxC detalle', 'Cuentas por cobrar: facturas'], ['cartera_cxp_detalle', 'CxP detalle', 'Cuentas por pagar: facturas'],
+  ['cartera_cxc_morosidad', 'CxC morosidad', 'Cuentas por cobrar: morosidad'], ['cartera_cxp_morosidad', 'CxP morosidad', 'Cuentas por pagar: morosidad'],
+  ['cartera_cxc_control', 'CxC control', 'Cuentas por cobrar: control'], ['cartera_cxp_control', 'CxP control', 'Cuentas por pagar: control'],
+  ['activos_depreciacion', 'Activos', 'Activos fijos'], ['activos_amortizacion', 'Intangibles', 'Activos intangibles'],
+  ['inventario_valoracion', 'Inventario', 'Valoración del inventario'], ['pendientes', 'Pendientes', 'Pendientes y comentarios']
+];
+// Otras tablas de datos que el Excel no mostraba
+const TABLAS_EXTRA = [
+  ['auxiliares', 'Datos auxiliares', 'Auxiliares'], ['activos_fijos', 'Datos activos', 'Activos fijos y su depreciación'],
+  ['depreciacion_registrada', 'Datos deprec.', 'Depreciaciones registradas'], ['inventario_items', 'Datos inventario', 'Artículos de inventario'],
+  ['inventario_movimientos', 'Datos mov. inv.', 'Movimientos de inventario'], ['inventario_cierres', 'Datos cierres inv.', 'Cierres de inventario'],
+  ['conciliaciones', 'Datos conciliación', 'Conciliaciones bancarias'], ['partidas_banco', 'Datos partidas banco', 'Partidas del extracto'],
+  ['partidas_conciliadas', 'Datos partidas conc.', 'Partidas conciliadas'], ['recurrentes', 'Datos recurrentes', 'Movimientos recurrentes'],
+  ['vencimientos', 'Datos vencimientos', 'Vencimientos'], ['vencimientos_cumplidos', 'Datos venc. cumplidos', 'Vencimientos cumplidos'],
+  ['presupuestos', 'Datos presupuesto', 'Presupuestos'], ['cierres_anuales', 'Datos cierres anuales', 'Cierres anuales'],
+  ['cifras_anteriores', 'Datos cifras ant.', 'Cifras de años anteriores'], ['itbms_manual', 'Datos ITBMS manual', 'ITBMS escrito a mano'],
+  ['notas_eeff', 'Datos notas EEFF', 'Notas a los estados financieros'], ['notas_detalle', 'Datos notas detalle', 'Detalle de notas'],
+  ['impuestos_config', 'Datos impuestos conf.', 'Configuración de impuestos'], ['impuestos_anio', 'Datos ISR por año', 'Impuesto sobre la renta por año'],
+  ['dr_manual', 'Datos renta manual', 'Montos escritos a mano en la declaración'], ['dr_aprobaciones', 'Datos aprobaciones', 'Aprobaciones de la declaración'],
+  ['periodos', 'Datos períodos', 'Períodos cerrados'], ['empresa_usuarios', 'Datos usuarios', 'Usuarios de la empresa'],
+  ['soportes', 'Datos soportes', 'Lista de soportes adjuntos'], ['importaciones', 'Datos importaciones', 'Importaciones'],
+  ['comentarios_transaccion', 'Datos comentarios', 'Comentarios'], ['bitacora', 'Bitácora', 'Bitácora de cambios']
+];
+
+function hojasAdicionales(d) {
+  const out = [];
+  const inf = d.informes;
+  if (inf && inf.por_anio) {
+    for (const anio of Object.keys(inf.por_anio).sort()) {
+      const bloque = inf.por_anio[anio];
+      const vacio = (!Array.isArray(bloque.estado_resultados) || !bloque.estado_resultados.length)
+        && (!Array.isArray(bloque.estado_balance_general) || !bloque.estado_balance_general.length);
+      if (vacio) continue;
+      for (const [k, corto, largo] of INFORMES_ANIO) {
+        const x = hojaGenerica(`${corto} ${anio}`, `${largo} ${anio}`, bloque[k], d, `${d.empresa.razon_social} · Año ${anio}`);
+        if (x) out.push(x);
+      }
+      const itbms = [];
+      for (const m of Object.keys(bloque.informe_itbms || {})) {
+        const f = bloque.informe_itbms[m];
+        if (Array.isArray(f)) f.forEach((r) => itbms.push({ mes: Number(m), ...r }));
+      }
+      const xi = hojaGenerica(`ITBMS ${anio}`, `Informe de ITBMS ${anio}`, itbms, d, `${d.empresa.razon_social} · Año ${anio}`);
+      if (xi) out.push(xi);
+    }
+    const f = inf.a_la_fecha || {};
+    for (const [k, corto, largo] of INFORMES_FECHA) {
+      const x = hojaGenerica(corto, largo, f[k], d, `${d.empresa.razon_social} · al ${fechaCorta(f.fecha)}`);
+      if (x) out.push(x);
+    }
+    for (const c of f.conciliaciones || []) {
+      const x = hojaGenerica(`Conciliación ${out.length}`, 'Conciliación bancaria: resumen', c.resumen, d, `${d.empresa.razon_social} · al ${fechaCorta(f.fecha)}`);
+      if (x) out.push(x);
+    }
+  }
+  for (const [k, corto, largo] of TABLAS_EXTRA) {
+    const x = hojaGenerica(corto, largo, (d.tablas || {})[k], d);
+    if (x) out.push(x);
+  }
+  return out;
+}
 
 // Hojas legibles del Excel
 export function armarSpecs(d) {
@@ -126,7 +250,7 @@ export function armarSpecs(d) {
     columnas: [{ t: 'Nombre', w: 1 }, { t: 'Tipo' }, { t: 'RUC' }, { t: 'DV' }, { t: 'Teléfono' }, { t: 'Correo' }],
     filas: (t.terceros || []).map((x) => ({ c: [x.razon_social, x.tipo, x.ruc || '', x.dv || '', x.telefono || '', x.correo || ''], e: 'normal' }))
   });
-  return specs;
+  return specs.concat(hojasAdicionales(d));
 }
 
 export function seccionRespaldo(empresa) {
@@ -156,7 +280,7 @@ export function seccionRespaldo(empresa) {
       const d = await obtenerRespaldo(empresa.id, (i, total, t) => { estado.textContent = `Reuniendo datos… ${i + 1} de ${total} (${t})`; });
       const fecha = hoy();
       if (tipo === 'json') {
-        const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: d.completo ? 2 : 1, fecha: new Date().toISOString(), empresa: d.empresa, tablas: d.tablas });
+        const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: d.completo ? (d.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: d.empresa, tablas: d.tablas, informes: d.informes || undefined });
         descargar(new TextEncoder().encode(cuerpo), `respaldo-${nombre()}-${fecha}.json`, 'application/json');
       } else {
         const meta = { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } };
@@ -214,7 +338,7 @@ function seccionRestaurar(empresa, nombre) {
       try {
         if (existe) {
           const actual = await obtenerRespaldo(empresa.id);
-          const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: actual.completo ? 2 : 1, fecha: new Date().toISOString(), empresa: actual.empresa, tablas: actual.tablas });
+          const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: actual.completo ? (actual.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: actual.empresa, tablas: actual.tablas, informes: actual.informes || undefined });
           descargar(new TextEncoder().encode(cuerpo), `antes-de-restaurar-${nombre()}-${hoy()}.json`, 'application/json');
         }
         const r = await db.rpc('restaurar_empresa', { p_json: j, p_reemplazar: existe });

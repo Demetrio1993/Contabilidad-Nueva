@@ -6,6 +6,7 @@ import {
   marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { barraExportar } from './informes.js';
+import { cargarCierreFiscal, tarjetaCierreFiscal, specCierreFiscal } from './cierrefiscal.js';
 
 const TIPOS = [
   ['balance', 'Balance general'],
@@ -313,12 +314,14 @@ export async function vistaEstados(id) {
     const rows = await cargarEstado(est.tipo);
     const tipo = est.tipo;
     const hay = rows.some((r) => r.fila === 'detalle');
+    const fiscal = tipo === 'balance' ? await cargarCierreFiscal(id, est.anio) : null;
     const nodo = h('div', null,
       h('div', { class: 'acciones' },
         h('button', { class: 'btn btn-sec', type: 'button', onclick: () => abrirAnteriores(tipo, rows).catch((er) => toast(traducirError(er), 'error')) }, `Cifras del año ${est.anio - 1}`)),
       avisoControl(rows),
-      hay ? tablaEstado(tipo, rows) : h('p', { class: 'ayuda' }, 'No hay cifras para este año. Registra transacciones y, si ya terminó el año, haz el cierre anual.'));
-    return { nodo, spec: hay ? specEstado(tipo, rows, est.anio) : null };
+      hay ? tablaEstado(tipo, rows) : h('p', { class: 'ayuda' }, 'No hay cifras para este año. Registra transacciones y, si ya terminó el año, haz el cierre anual.'),
+      hay ? tarjetaCierreFiscal(fiscal, est.anio) : null);
+    return { nodo, spec: hay ? specEstado(tipo, rows, est.anio) : null, fiscal };
   }
 
   // Paquete completo: los cuatro estados y las notas en un solo archivo
@@ -327,6 +330,10 @@ export async function vistaEstados(id) {
     for (const t of ['balance', 'resultados', 'patrimonio', 'flujo']) {
       const rows = await cargarEstado(t);
       if (rows.some((r) => r.fila === 'detalle')) specs.push(specEstado(t, rows, est.anio));
+      if (t === 'balance') {
+        const fz = await cargarCierreFiscal(id, est.anio);
+        if (fz && rows.some((r) => r.fila === 'detalle')) specs.push(specCierreFiscal(fz, est.anio, empresa.razon_social));
+      }
     }
     const { notas, detalles } = await cargarNotas();
     if (notas.length) specs.push(specNotas(notas, detalles, est.anio));
@@ -343,7 +350,8 @@ export async function vistaEstados(id) {
           barraExportar({
             empresa,
             obtener: () => (est.actual && est.actual.spec
-              ? { specs: [est.actual.spec], archivo: `${empresa.razon_social}-${est.tipo}-${est.anio}` } : null)
+              ? { specs: [est.actual.spec].concat(est.actual.fiscal ? [specCierreFiscal(est.actual.fiscal, est.anio, empresa.razon_social)] : []),
+                archivo: `${empresa.razon_social}-${est.tipo}-${est.anio}` } : null)
           }),
           h('p', { class: 'ayuda' }, 'Paquete completo (los cuatro estados y las notas en un solo archivo):'),
           barraExportar({ empresa, obtener: paqueteCompleto, etiquetaExcel: 'Todo en Excel', etiquetaPdf: 'Todo en PDF' })),

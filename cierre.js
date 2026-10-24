@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { barraExportar, abrirAjuste } from './informes.js';
 import { tarjetaVerificacion } from './verificacion.js';
+import { cargarCierreFiscal, tarjetaCierreFiscal, specCierreFiscal } from './cierrefiscal.js';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -45,7 +46,9 @@ export async function vistaCierre(id) {
       if (ap.error) throw ap.error;
       apertura = ap.data || [];
     }
+    const fiscal = await cargarCierreFiscal(id, anio);
     return {
+      fiscal,
       periodos: new Map((per.data || []).map((p) => [Number(p.mes), p])),
       cerrado, impuestos: (imp.data || [])[0] || null, preview: prev.data || [], asientos: cierre.data || [], cuentas: cuentas.data || [], apertura
     };
@@ -105,6 +108,7 @@ export async function vistaCierre(id) {
         return { c: [m, p && p.estado === 'cerrado' ? 'Cerrado' : 'Abierto', p && p.estado === 'cerrado' ? dia(p.cerrado_en) : ''] };
       })
     });
+    if (d.fiscal) out.push(specCierreFiscal(d.fiscal, anio, empresa.razon_social));
     return out;
   }
 
@@ -152,18 +156,17 @@ export async function vistaCierre(id) {
         fila('Renta gravable (utilidad antes de impuestos)', x.utilidad_antes),
         fila(`Seguro educativo (${(NUM(x.tasa) * 100).toFixed(2)} % de la renta gravable${NUM(x.tope) > 0 ? ', base máxima ' + dinero(x.tope) : ''})`, NUM(x.se_manual) + NUM(x.se_auto)),
         fila(x.isr_es_manual ? 'Impuesto sobre la renta (monto escrito a mano)' : 'Impuesto sobre la renta (tabla de persona natural)', NUM(x.isr_manual) + NUM(x.isr_auto)),
-        fila('Utilidad neta (pasa al balance general)', x.utilidad_neta, true))));
+        fila('Utilidad neta', x.utilidad_neta, true))));
     const nodos = [h('h2', null, `Impuestos del año ${anio}`)];
     if (!x.aplica) {
       nodos.push(h('p', { class: 'ayuda' }, x.tipo_persona === 'natural'
-        ? 'El ajuste automático está apagado para esta empresa.'
-        : 'El seguro educativo automático solo aplica a personas naturales.'));
+        ? 'El cálculo de impuestos está apagado para esta empresa.'
+        : 'El cálculo del seguro educativo y del impuesto sobre la renta solo aplica a personas naturales.'));
     } else {
       nodos.push(h('p', { class: 'ayuda' },
-        'El sistema crea solo el asiento del 31 de diciembre: debita Utilidad (pérdida) del ejercicio y acredita Impuesto sobre la renta por pagar (auxiliar S001 para el seguro educativo). Lo recalcula con cada cambio de la contabilidad. ISR: hasta 11,000.00 exento; de 11,000.01 a 50,000.00, 15 % del excedente de 11,000.00; más de 50,000.00, 5,850.00 más 25 % del excedente de 50,000.00. El año cerrado ya no cambia.'));
+        'El seguro educativo y el impuesto sobre la renta se calculan para el estado de resultados, pero no se registran solos en la contabilidad: el cierre fiscal se registra a mano al final del año (cuadro de abajo). ISR: hasta 11,000.00 exento; de 11,000.01 a 50,000.00, 15 % del excedente de 11,000.00; más de 50,000.00, 5,850.00 más 25 % del excedente de 50,000.00.'));
     }
     nodos.push(tabla);
-    if (x.asiento_consecutivo) nodos.push(h('p', { class: 'ayuda' }, `Asiento automático N.º ${x.asiento_consecutivo} en el Diario, referencia AJ-IMP-${anio}.`));
     if (x.aplica && !x.cerrado) {
       const isr = h('input', { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', value: String(NUM(x.isr_objetivo)) });
       const guardar = h('button', { class: 'btn btn-sec btn-peq', type: 'button' }, 'Guardar monto escrito');
@@ -186,18 +189,9 @@ export async function vistaCierre(id) {
         toast('Impuesto sobre la renta automático.', 'ok');
         pintar();
       });
-      const recalcular = h('button', { class: 'btn btn-sec btn-peq', type: 'button' }, 'Recalcular ahora');
-      recalcular.addEventListener('click', async () => {
-        recalcular.disabled = true;
-        const { error } = await db.rpc('impuestos_recalcular_ahora', { p_empresa: id, p_anio: anio });
-        recalcular.disabled = false;
-        if (error) { toast(traducirError(error), 'error'); return; }
-        toast('Impuestos recalculados.', 'ok');
-        pintar();
-      });
       nodos.push(
         h('label', { class: 'campo' }, h('span', null, `Impuesto sobre la renta de ${anio} (B/.): escribe un monto solo si quieres cambiar el cálculo automático`), isr),
-        h('div', { class: 'acciones' }, guardar, x.isr_es_manual ? volverAuto : null, recalcular));
+        h('div', { class: 'acciones' }, guardar, x.isr_es_manual ? volverAuto : null));
     }
     return h('div', { class: 'tarjeta' }, nodos);
   }
@@ -286,7 +280,7 @@ export async function vistaCierre(id) {
           empresa,
           obtener: () => (est.datos ? { specs: specs(est.datos), archivo: `${empresa.razon_social}-cierre-${est.anio}` } : null)
         })),
-        tarjetaVerificacion({ empresa, anio: est.anio }), tarjetaImpuestos(d), seccionAnual(d), seccionMensual(d));
+        tarjetaVerificacion({ empresa, anio: est.anio }), tarjetaImpuestos(d), tarjetaCierreFiscal(d.fiscal, est.anio), seccionAnual(d), seccionMensual(d));
     } catch (e) {
       est.datos = null;
       zona.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null, traducirError(e))));
