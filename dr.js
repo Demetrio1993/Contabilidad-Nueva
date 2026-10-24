@@ -71,7 +71,8 @@ export async function vistaRenta(id) {
   mostrar(marcoEmpresa({ id, razon_social: '…' }, 'renta', cargando()));
   const empresa = await cargarEmpresa(id);
   const puedeAsignar = empresa.rol === 'admin' || empresa.rol === 'contador';
-  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set() };
+  const esLector = empresa.rol === 'lector';
+  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set(), aprob: [], aprobFalta: false, confirma: false, nota: '' };
   const cuerpo = h('div');
   const anio = h('input', {
     type: 'number', min: '2000', max: '2100', inputmode: 'numeric', value: String(est.anio),
@@ -92,6 +93,7 @@ export async function vistaRenta(id) {
       est.filas = (d.data || []).map((x) => ({ ...x, lado: lados.has(x.renglon) ? lados.get(x.renglon).lado : null }));
       est.base = b.data || [];
       est.obs = o.data || [];
+      await cargarAprobaciones();
       pintar();
     } catch (e) {
       est.filas = []; est.base = []; est.obs = [];
@@ -99,6 +101,111 @@ export async function vistaRenta(id) {
         /dr_declaracion|dr_base|dr_plantilla/.test(String(e && e.message))
           ? 'Falta ejecutar el script 81 en Supabase (Declaración de renta).' : traducirError(e))));
     }
+  }
+
+  // Aprobaciones del cliente (archivo 87). Si el script no se ha ejecutado, el resto de la pantalla sigue igual.
+  async function cargarAprobaciones() {
+    est.aprob = []; est.aprobFalta = false;
+    const r = await db.from('dr_aprobaciones')
+      .select('id, anio, estado, aprobado_correo, aprobado_en, nota, correo_estado, correo_detalle, leida_en, revocada_en, motivo_revocacion')
+      .eq('empresa_id', id).order('aprobado_en', { ascending: false }).limit(30);
+    if (r.error) { est.aprobFalta = /dr_aprobaciones/.test(String(r.error.message)); return; }
+    est.aprob = r.data || [];
+  }
+
+  async function avisarCorreo(aprobId) {
+    try {
+      const r = await db.functions.invoke('notificar-aprobacion', { body: { aprobacion_id: aprobId } });
+      if (r.error) return false;
+      return !!(r.data && r.data.ok);
+    } catch (e) { return false; }
+  }
+
+  function fechaHora(t) {
+    const d = new Date(t);
+    return d.toLocaleDateString('es-PA') + ' ' + d.toLocaleTimeString('es-PA', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function aprobar() {
+    const { data, error } = await db.rpc('dr_aprobar', { p_empresa: id, p_anio: est.anio, p_nota: texto(est.nota) });
+    if (error) { toast(traducirError(error), 'error'); return; }
+    est.confirma = false; est.nota = '';
+    toast('Aprobada. Se avisó al administrador y al contador.', 'ok');
+    const ok = await avisarCorreo(data);
+    if (!ok) toast('El aviso quedó en el buzón. El correo todavía no está configurado o falló.', 'info');
+    await cargar();
+  }
+
+  function textoCorreo(a) {
+    if (a.correo_estado === 'enviado') return 'Correo enviado';
+    if (a.correo_estado === 'error') return 'El correo falló';
+    if (a.correo_estado === 'sin_configurar') return 'Correo sin configurar';
+    return 'Correo pendiente';
+  }
+
+  function bloqueAprobacion() {
+    if (est.aprobFalta) {
+      return puedeAsignar ? h('div', { class: 'tarjeta error' }, h('p', null, 'Falta ejecutar el script 87 en Supabase (aprobación de la declaración).')) : null;
+    }
+    const activa = est.aprob.find((a) => a.anio === est.anio && a.estado === 'aprobada');
+    if (esLector) {
+      if (activa) {
+        return h('div', { class: 'tarjeta dr-aprobada' },
+          h('h3', null, `✔ Declaración ${est.anio} aprobada`),
+          h('p', null, `Aprobaste la presentación de la Declaración de Renta y sus anexos el ${fechaHora(activa.aprobado_en)}.`),
+          activa.nota ? h('p', { class: 'ayuda' }, `Tu nota: ${activa.nota}`) : null,
+          h('p', { class: 'ayuda' }, 'El administrador y el contador ya tienen el aviso. Si hay que corregir algo, ellos pueden quitar la aprobación y te la vuelven a pedir.'));
+      }
+      const check = h('input', { type: 'checkbox', checked: est.confirma, onchange: (e) => { est.confirma = e.target.checked; boton.disabled = !est.confirma; } });
+      const nota = h('textarea', { rows: '2', maxlength: '300', placeholder: 'Nota para el contador (opcional)', value: est.nota,
+        oninput: (e) => { est.nota = e.target.value; } });
+      nota.value = est.nota;
+      const boton = h('button', { class: 'btn btn-bloque', type: 'button', disabled: !est.confirma, onclick: aprobar }, 'Enviar al Administrador/Contador');
+      return h('div', { class: 'tarjeta dr-aprobar' },
+        h('h3', null, `Aprobación de la declaración ${est.anio}`),
+        h('p', { class: 'ayuda' }, 'Cuando hayas revisado la declaración y aclarado tus dudas, marca "Aprobado". Con eso autorizas que se presente a la DGI la Declaración de Renta con sus anexos.'),
+        h('label', { class: 'fila-check' }, check, h('span', null, 'Aprobado: autorizo la presentación de la Declaración de Renta y sus anexos ante la DGI.')),
+        nota,
+        boton);
+    }
+    if (!puedeAsignar) return null;
+    const sin = est.aprob.filter((a) => a.estado === 'aprobada' && !a.leida_en).length;
+    const lista = est.aprob.map((a) => h('div', { class: 'dr-aviso' + (a.estado === 'aprobada' && !a.leida_en ? ' nuevo' : '') },
+      h('div', null,
+        h('strong', null, `Año ${a.anio} · ${a.estado === 'aprobada' ? 'Aprobada' : 'Aprobación quitada'}`),
+        h('div', { class: 'ayuda' }, `${a.aprobado_correo || 'El cliente'} · ${fechaHora(a.aprobado_en)}`),
+        a.nota ? h('div', null, `“${a.nota}”`) : null,
+        a.estado === 'revocada' && a.motivo_revocacion ? h('div', { class: 'ayuda' }, `Motivo: ${a.motivo_revocacion}`) : null,
+        a.estado === 'aprobada' ? h('div', { class: 'ayuda' }, textoCorreo(a)) : null),
+      a.estado === 'aprobada' ? h('div', { class: 'dr-aviso-botones' },
+        !a.leida_en ? h('button', { class: 'btn btn-sec', type: 'button', onclick: async () => {
+          const r = await db.rpc('dr_marcar_leida', { p_id: a.id });
+          if (r.error) toast(traducirError(r.error), 'error'); else await cargar();
+        } }, 'Marcar leída') : null,
+        a.correo_estado !== 'enviado' ? h('button', { class: 'btn btn-sec', type: 'button', onclick: async () => {
+          const ok = await avisarCorreo(a.id);
+          toast(ok ? 'Correo enviado.' : 'No se pudo enviar el correo. Revisa la configuración.', ok ? 'ok' : 'error');
+          await cargar();
+        } }, 'Reintentar envío') : null,
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: () => quitar(a) }, 'Quitar aprobación')) : null));
+    return h('div', { class: 'tarjeta' },
+      h('h3', null, sin ? `Buzón de aprobaciones (${sin} sin leer)` : 'Buzón de aprobaciones'),
+      lista.length ? h('div', null, lista) : h('p', { class: 'ayuda' }, 'Cuando el cliente apruebe una declaración, el aviso aparece aquí y también llega por correo.'));
+  }
+
+  function quitar(a) {
+    const motivo = h('input', { type: 'text', maxlength: '200', placeholder: 'Motivo (opcional)' });
+    let cerrar;
+    cerrar = modal(`Quitar aprobación ${a.anio}`, h('form', { onsubmit: async (ev) => {
+      ev.preventDefault();
+      const r = await db.rpc('dr_revocar_aprobacion', { p_id: a.id, p_motivo: texto(motivo.value) });
+      if (r.error) { toast(traducirError(r.error), 'error'); return; }
+      toast('Aprobación quitada. El cliente puede aprobar de nuevo.', 'ok');
+      cerrar(); await cargar();
+    } },
+    h('p', { class: 'ayuda' }, 'El cliente podrá aprobar otra vez cuando la declaración esté corregida.'),
+    campo('Motivo', motivo),
+    h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Quitar aprobación')));
   }
 
   function detalleRenglon(f) {
@@ -250,7 +357,8 @@ export async function vistaRenta(id) {
         h('div', null, h('span', { class: 'ayuda' }, 'D.E. 251 Estado de Emergencia Nacional'), h('strong', { class: 'dr-cursiva' }, 'NO'))),
       h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre. Toca un renglón con monto para ver sus cuentas. El lápiz ✎ permite escribir el monto a mano (reemplaza al de las cuentas y se puede quitar). Los renglones resaltados son de fórmula y todavía no tienen monto, salvo los que escribas a mano. Los renglones "Menos:" van en positivo.'),
       tabla,
-      bloqueObservacion());
+      bloqueObservacion(),
+      bloqueAprobacion());
   }
 
   mostrar(marcoEmpresa(empresa, 'renta', [
