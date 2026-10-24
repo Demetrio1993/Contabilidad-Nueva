@@ -287,8 +287,14 @@ export async function vistaInformes(id) {
         .eq('empresa_id', id).gte('fecha', d).lte('fecha', hasta)
         .order('fecha').order('consecutivo').range(0, 4999);
     }
-    const { data, error } = r;
+    const { data: datos, error } = r;
     if (error) throw error;
+    // Siempre en orden cronológico: por fecha y, en la misma fecha, por número de asiento
+    const data = (datos || []).slice().sort((a, b) =>
+      String(a.fecha).localeCompare(String(b.fecha)) || Number(a.consecutivo) - Number(b.consecutivo));
+    // Aviso si la numeración no sigue la fecha (se corrige con un botón para administrador y contador)
+    let desorden = false;
+    for (let i = 1; i < data.length; i++) if (Number(data[i].consecutivo) < Number(data[i - 1].consecutivo)) { desorden = true; break; }
     let td = 0; let tc = 0;
     const filasSpec = [];
     const tarjetas = data.map((a) => {
@@ -326,6 +332,16 @@ export async function vistaInformes(id) {
         chip('Débitos = Créditos', redondear(td) === redondear(tc) ? 'Cuadrado' : 'Descuadrado'),
         chip('Total débitos', dinero(td)),
         chip('Total créditos', dinero(tc))),
+      desorden ? h('div', { class: 'tarjeta dr-aviso-fiscal' },
+        h('strong', null, 'Los números de asiento no siguen el orden de las fechas.'),
+        h('p', { class: 'ayuda' }, 'Los asientos se muestran por fecha, pero sus números quedaron fuera de orden. Se acomodan con un toque: los números pasan a seguir las fechas.'),
+        (empresa.rol === 'admin' || empresa.rol === 'contador')
+          ? h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: async () => {
+            const rr = await db.rpc('renumerar_asientos', { p_empresa: id });
+            if (rr.error) { toast(traducirError(rr.error), 'error'); return; }
+            toast('Asientos numerados en orden de fecha.', 'ok'); pintar();
+          } }, 'Ordenar números por fecha')
+          : h('p', { class: 'ayuda' }, 'Pídele al administrador o al contador que los ordene.')) : null,
       h('div', { class: 'acciones' },
         h('button', { class: 'btn', type: 'button', onclick: () => abrirAjuste(id, cuentas, rango()[1], pintar) }, '+ Asiento de ajuste')),
       data.length ? tarjetas : h('p', { class: 'ayuda' }, 'No hay asientos en este período.'));

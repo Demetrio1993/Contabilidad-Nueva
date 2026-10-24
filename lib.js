@@ -10,7 +10,7 @@ if (!window.supabase) {
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
 // Número de versión que se muestra al pie. La descripción de cada versión es solo interna (manual y memoria).
-export const VERSION = '37';
+export const VERSION = '38';
 // Versión 31: catálogo reorganizado (gastos de operación y financieros), auxiliares por cuenta y cuadros con todos los montos.
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)

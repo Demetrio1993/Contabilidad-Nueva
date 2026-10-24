@@ -66,6 +66,8 @@ function claveFila(tipo, f) {
   if (f.fila !== 'detalle') return null;
   if (tipo === 'balance' || tipo === 'resultados') {
     if (f.numero) return f.numero;
+    if (tipo === 'resultados' && f.concepto === 'Seguro educativo') return 'SEGURO_EDUCATIVO';
+    if (tipo === 'resultados' && f.concepto === 'Impuesto sobre la renta') return 'ISR_RENTA';
     if (tipo === 'balance' && /pendiente de cierre/i.test(f.concepto || '')) return 'UTILIDAD_PENDIENTE';
     return null;
   }
