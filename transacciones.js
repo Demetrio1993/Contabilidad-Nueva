@@ -17,7 +17,8 @@ const TIPOS_TRX = {
   gasto: 'Gasto',
   cobro_cliente: 'Cobro a cliente',
   pago_proveedor: 'Pago a proveedor',
-  otro: 'Otro movimiento'
+  otro: 'Otro movimiento',
+  compuesto: 'Asiento compuesto (varias cuentas)'
 };
 const FACTURAS = ['venta', 'compra_mercancia', 'costo', 'gasto'];
 const COMPRAS = ['compra_mercancia', 'costo', 'gasto'];
@@ -89,7 +90,8 @@ export async function vistaTransacciones(id) {
     const base = 'id, tipo, fecha, tercero_id, nombre_tercero, ruc, dv, numero_factura, descripcion, monto_bruto, itbms, monto_neto, forma, cuenta_principal_id, cuenta_contrapartida_id, creado_por';
     const fiscal = ', fiscal_emitida, fiscal_numero, fiscal_fecha';
     hayFiscal = true;
-    let r = await consulta(base + ', anulada, motivo_anulacion' + fiscal + ', retencion_itbms, aux_principal_id, aux_contra_id');
+    let r = await consulta(base + ', anulada, motivo_anulacion' + fiscal + ', retencion_itbms, aux_principal_id, aux_contra_id, aplica_a_id');
+    if (r.error) r = await consulta(base + ', anulada, motivo_anulacion' + fiscal + ', retencion_itbms, aux_principal_id, aux_contra_id');   // sin archivo 85
     if (r.error) r = await consulta(base + ', anulada, motivo_anulacion' + fiscal + ', retencion_itbms');   // sin archivo 77
     if (r.error) r = await consulta(base + ', anulada, motivo_anulacion' + fiscal);   // sin archivo 64
     if (r.error && soloPendientes) { soloPendientes = false; toast('Falta ejecutar el archivo 62 en Supabase.', 'error'); r = await consulta(base + ', anulada, motivo_anulacion'); }
@@ -138,6 +140,7 @@ export async function vistaTransacciones(id) {
       empresa.contribuyente_itbms ? chip('ITBMS pagado', suma(COMPRAS, 'itbms') - notas(COMPRAS, 'itbms')) : null,
       chip('Pagos', suma(['pago_proveedor'], 'monto_neto'), vigentes(['pago_proveedor'])),
       chip('Otros movimientos', suma(['otro'], 'monto_neto'), vigentes(['otro'])),
+      vigentes(['compuesto']) ? chip('Asientos compuestos', suma(['compuesto'], 'monto_neto'), vigentes(['compuesto'])) : null,
       hayFiscal && !soloPendientes ? h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, 'Sin factura fiscal DGI'), h('strong', null, String(filas.filter((t) => !t.anulada && t.tipo === 'venta' && !t.fiscal_emitida).length))) : null
     ].filter(Boolean));
     if (filas.length === 0) {
@@ -176,6 +179,13 @@ export async function vistaTransacciones(id) {
     const acciones = !puedeCorregir ? null : barraAcciones({
       editar: t.anulada ? null : () => {
         if (notasPorTrx[t.id]) { toast('Esta factura tiene notas de crédito. Elimínalas antes de editarla.', 'error'); return; }
+        if (t.tipo === 'compuesto') {
+          db.rpc('lineas_transaccion', { p_transaccion: t.id }).then((r) => {
+            if (r.error) { toast(traducirError(r.error), 'error'); return; }
+            cerrar(); abrirNueva(t, r.data || []);
+          });
+          return;
+        }
         cerrar(); abrirNueva(t);
       },
       anular: t.anulada ? null : () => pedirMotivo({
@@ -198,6 +208,25 @@ export async function vistaTransacciones(id) {
         }
       })
     });
+    const cajaLineas = h('div');
+    const cajaAplica = h('div');
+    if (t.tipo === 'compuesto') {
+      db.rpc('lineas_transaccion', { p_transaccion: t.id }).then((r) => {
+        if (r.error) return;
+        cajaLineas.replaceChildren(h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
+          h('thead', null, h('tr', null, h('th', null, 'Cuenta'), h('th', { class: 'num' }, 'Débito'), h('th', { class: 'num' }, 'Crédito'))),
+          h('tbody', null, (r.data || []).map((l) => h('tr', null,
+            h('td', null, (nombreCuenta[l.cuenta_id] || '') + (l.auxiliar_id && auxPorId()[l.auxiliar_id] ? ' · ' + etiquetaAux(auxPorId()[l.auxiliar_id]) : '')),
+            h('td', { class: 'num' }, Number(l.debito) ? dinero(l.debito) : ''),
+            h('td', { class: 'num' }, Number(l.credito) ? dinero(l.credito) : '')))))));
+      });
+    }
+    if (t.aplica_a_id && ['cobro_cliente', 'pago_proveedor'].includes(t.tipo)) {
+      db.from('transacciones').select('numero_factura, fecha, descripcion').eq('id', t.aplica_a_id).maybeSingle().then((r) => {
+        if (r.data) cajaAplica.replaceChildren(h('p', null, h('strong', null, 'Asignado a la factura: '),
+          `${r.data.numero_factura || 'sin número'} del ${fechaCorta(r.data.fecha)}`));
+      });
+    }
     cerrar = modal(TIPOS_TRX[t.tipo] + (t.anulada ? ' (anulada)' : ''), h('div', null,
       t.anulada ? h('p', { class: 'ayuda' }, 'Anulada' + (t.motivo_anulacion ? ': ' + t.motivo_anulacion : '') + '. No cuenta en informes.') : null,
       dato('Fecha', fechaCorta(t.fecha)),
@@ -209,7 +238,9 @@ export async function vistaTransacciones(id) {
       Number(t.itbms) > 0 ? dato('ITBMS', dinero(t.itbms)) : null,
       Number(t.retencion_itbms) > 0 ? dato('ITBMS retenido', dinero(t.retencion_itbms)) : null,
       dato('Total', dinero(t.monto_neto)),
-      dato('Forma de pago', t.forma === 'credito' ? 'A crédito' : 'Al contado'),
+      t.tipo === 'compuesto' ? null : dato('Forma de pago', t.forma === 'credito' ? 'A crédito' : 'Al contado'),
+      cajaLineas,
+      cajaAplica,
       bloqueFiscal(t, recargar),
       bloqueNotasCredito({ t, empresa, miId, puedeRegistrar: puedeMarcar, alCambiar: recargar }),
       panelSoportes({
@@ -217,10 +248,10 @@ export async function vistaTransacciones(id) {
         puedeQuitar: (x) => !soloRegistra || (miId && x.creado_por === miId)
       }),
       panelComentarios({ empresaId: id, transaccionId: t.id, rol: empresa.rol, miId, alCambiar: cargarMes }),
-      dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
-      dato('Auxiliar de la cuenta principal', etiquetaAux(auxPorId()[t.aux_principal_id])),
-      dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
-      dato('Auxiliar de la contrapartida', etiquetaAux(auxPorId()[t.aux_contra_id])),
+      t.tipo === 'compuesto' ? null : dato('Cuenta principal', nombreCuenta[t.cuenta_principal_id]),
+      t.tipo === 'compuesto' ? null : dato('Auxiliar de la cuenta principal', etiquetaAux(auxPorId()[t.aux_principal_id])),
+      t.tipo === 'compuesto' ? null : dato('Contrapartida', nombreCuenta[t.cuenta_contrapartida_id]),
+      t.tipo === 'compuesto' ? null : dato('Auxiliar de la contrapartida', etiquetaAux(auxPorId()[t.aux_contra_id])),
       acciones));
   }
 
@@ -268,12 +299,12 @@ export async function vistaTransacciones(id) {
       h('button', { class: 'btn btn-sec btn-bloque', type: 'button', onclick: () => cerrar() }, 'Cancelar')));
   }
 
-  function abrirNueva(editando) {
+  function abrirNueva(editando, lineasIni) {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
       modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
       lectura: null, nuevoTercero: null, duplicada: null, retencion: '', soporte: null,
-      auxP: '', auxC: ''
+      auxP: '', auxC: '', aplicaA: '', aplicaTxt: '', lineas: []
     };
     const cuerpo = h('div');
     let cerrar;
@@ -285,6 +316,8 @@ export async function vistaTransacciones(id) {
     // Retención del ITBMS: solo empresas contribuyentes; en ventas y compras a crédito se anota al cobrar o pagar
     const llevaRetencion = () => !!empresa.contribuyente_itbms && st.tipo !== 'otro' && !esCredito();
 
+    function nuevaLinea() { return { cuenta: '', aux: '', debito: '', credito: '' }; }
+
     function porDefecto() {
       st.lectura = null;
       st.duplicada = null;
@@ -295,6 +328,9 @@ export async function vistaTransacciones(id) {
       st.principal = '';
       st.auxP = '';
       st.auxC = '';
+      st.aplicaA = '';
+      st.aplicaTxt = '';
+      st.lineas = [nuevaLinea(), nuevaLinea()];
       st.contra = clave.caja || '';
       st.modoItbms = '7';
       if (st.tipo === 'compra_mercancia') st.principal = clave.inventario || '';
@@ -321,10 +357,18 @@ export async function vistaTransacciones(id) {
       st.auxP = editando.aux_principal_id || '';
       st.auxC = editando.aux_contra_id || '';
       st.todas = true;
+      st.aplicaA = editando.aplica_a_id || '';
+      if (st.aplicaA) st.aplicaTxt = 'factura asignada';
+      if (editando.tipo === 'compuesto' && lineasIni && lineasIni.length) {
+        st.lineas = lineasIni.map((l) => ({
+          cuenta: l.cuenta_id, aux: l.auxiliar_id || '',
+          debito: Number(l.debito) > 0 ? String(l.debito) : '', credito: Number(l.credito) > 0 ? String(l.credito) : ''
+        }));
+      }
     }
 
     function principales() {
-      if (st.todas || st.tipo === 'otro') return cuentas;
+      if (st.todas || st.tipo === 'otro' || st.tipo === 'compuesto') return cuentas;
       const filtros = {
         venta: (c) => c.tipo === 'ingreso',
         compra_mercancia: (c) => c.numero.startsWith('1.1.05.') || c.tipo === 'costo',
@@ -336,7 +380,7 @@ export async function vistaTransacciones(id) {
       return cuentas.filter(filtros[st.tipo]);
     }
     function contrapartidas() {
-      if (st.todas || st.tipo === 'otro') return cuentas;
+      if (st.todas || st.tipo === 'otro' || st.tipo === 'compuesto') return cuentas;
       return cuentas.filter((c) => c.numero.startsWith('1.1.01.'));
     }
     // Cuenta de la contrapartida: la elegida o, si es a crédito, clientes o proveedores
@@ -345,6 +389,7 @@ export async function vistaTransacciones(id) {
       return cuentaPorId[st.contra] || null;
     }
     function tercerosVisibles() {
+      if (st.tipo === 'compuesto') return terceros;
       const quiere = ['venta', 'cobro_cliente'].includes(st.tipo) ? 'cliente' : 'proveedor';
       return terceros.filter((t) => t.tipo === quiere || t.tipo === 'ambos');
     }
@@ -460,6 +505,7 @@ export async function vistaTransacciones(id) {
 
     async function guardar(ev) {
       ev.preventDefault();
+      if (st.tipo === 'compuesto') return guardarCompuesto();
       const bruto = Number(st.bruto);
       if (!(bruto > 0)) { toast('Escribe un monto mayor que cero.', 'error'); return; }
       if (!st.principal) { toast('Elige la cuenta principal.', 'error'); return; }
@@ -490,6 +536,10 @@ export async function vistaTransacciones(id) {
         const fa = await db.rpc('fijar_auxiliares', { p_transaccion: nuevoId, p_aux_principal: st.auxP || null, p_aux_contra: st.auxC || null });
         if (fa.error) toast('Se registró, pero no se pudo guardar el auxiliar: ' + traducirError(fa.error), 'error');
       }
+      if (nuevoId && ['cobro_cliente', 'pago_proveedor'].includes(st.tipo) && (st.aplicaA || (editando && editando.aplica_a_id))) {
+        const ap = await db.rpc('fijar_aplicacion', { p_transaccion: nuevoId, p_factura: st.aplicaA || null });
+        if (ap.error) toast('Se registró, pero no se pudo asignar a la factura: ' + traducirError(ap.error), 'error');
+      }
       if (!editando && st.lectura && st.lectura.cufe && nuevoId) {
         const c = await db.rpc('asignar_cufe', { p_transaccion: nuevoId, p_cufe: st.lectura.cufe });
         if (c.error) toast('Se registró, pero no se pudo guardar el código de la factura electrónica: ' + traducirError(c.error), 'error');
@@ -502,6 +552,114 @@ export async function vistaTransacciones(id) {
       cerrar();
       mes = st.fecha.slice(0, 7);
       await cargarMes();
+    }
+
+    // ----- Asiento compuesto: tantas cuentas como haga falta -----
+    function lineasUsadas() { return st.lineas.filter((l) => l.cuenta || l.debito || l.credito); }
+    function sumasCompuesto() {
+      let d = 0; let c = 0;
+      lineasUsadas().forEach((l) => { d += Number(l.debito || 0); c += Number(l.credito || 0); });
+      return [Math.round(d * 100) / 100, Math.round(c * 100) / 100];
+    }
+    async function guardarCompuesto() {
+      const us = lineasUsadas();
+      if (us.length < 2) { toast('Un asiento necesita al menos dos líneas.', 'error'); return; }
+      for (const l of us) {
+        const d = Number(l.debito || 0); const c = Number(l.credito || 0);
+        if (!l.cuenta) { toast('Hay una línea sin cuenta.', 'error'); return; }
+        if ((d > 0) === (c > 0)) { toast('Cada línea lleva débito o crédito, no los dos ni ninguno.', 'error'); return; }
+      }
+      const [d, c] = sumasCompuesto();
+      if (d !== c) { toast(`El asiento no cuadra: débitos ${dinero(d)} y créditos ${dinero(c)}.`, 'error'); return; }
+      boton.disabled = true;
+      const lineas = us.map((l) => ({ cuenta_id: l.cuenta, auxiliar_id: l.aux || null, debito: Number(l.debito || 0), credito: Number(l.credito || 0) }));
+      const comunes = { p_fecha: st.fecha, p_tercero_id: st.tercero || null, p_numero: texto(st.factura), p_descripcion: texto(st.descripcion), p_lineas: lineas };
+      const { data: nuevoId, error } = await db.rpc(editando ? 'editar_transaccion_compuesta' : 'registrar_transaccion_compuesta',
+        editando ? { p_transaccion: editando.id, ...comunes } : { p_empresa: id, ...comunes });
+      boton.disabled = false;
+      if (error) { toast(traducirError(error), 'error'); return; }
+      if (!editando && st.soporte && nuevoId) {
+        try { await subirSoporte({ empresaId: id, transaccionId: nuevoId, archivo: st.soporte }); }
+        catch (e) { toast('Se registró, pero no se pudo guardar el archivo adjunto: ' + traducirError(e), 'error'); }
+      }
+      toast(editando ? 'Cambios guardados.' : 'Asiento compuesto registrado.', 'ok');
+      cerrar();
+      mes = st.fecha.slice(0, 7);
+      await cargarMes();
+    }
+
+    function pintarCompuesto() {
+      totalEl = null; itbmsEl = null;
+      const tipoSel = h('select', { value: st.tipo, onchange: (e) => { st.tipo = e.target.value; porDefecto(); pintarForm(); } },
+        Object.entries(TIPOS_TRX).map(([v, n]) => h('option', { value: v }, n)));
+      const tot = h('p', { class: 'total-neto' });
+      const pintarTot = () => {
+        const [d, c] = sumasCompuesto();
+        const dif = Math.round((d - c) * 100) / 100;
+        tot.textContent = `Débitos ${dinero(d)} · Créditos ${dinero(c)}` + (dif === 0 ? (d > 0 ? ' · Cuadrado' : '') : ` · Diferencia ${dinero(Math.abs(dif))}`);
+      };
+      const monto = (clase, ph, l) => h('input', {
+        type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: ph, value: l[clase],
+        oninput: (e) => { l[clase] = e.target.value; pintarTot(); }
+      });
+      const cajas = st.lineas.map((l, i) => h('div', { class: 'linea-ajuste' },
+        h('select', { value: l.cuenta, onchange: (e) => { l.cuenta = e.target.value; l.aux = ''; pintarForm(); } },
+          opcionesCuentas(cuentas, 'Elegir cuenta…')),
+        campoAuxiliar({
+          empresaId: id, rol: empresa.rol, etiqueta: 'Auxiliar (opcional)', cuenta: cuentaPorId[l.cuenta],
+          datos: auxDatos, valor: l.aux, alCambiar: (v) => { l.aux = v; }, redibujar: pintarForm
+        }),
+        h('div', { class: 'par-montos' }, monto('debito', 'Débito', l), monto('credito', 'Crédito', l)),
+        h('button', {
+          class: 'btn btn-sec btn-peq', type: 'button',
+          onclick: () => {
+            if (st.lineas.length <= 2) { toast('Un asiento necesita al menos dos líneas.', 'error'); return; }
+            st.lineas.splice(i, 1); pintarForm();
+          }
+        }, 'Quitar línea')));
+      boton = h('button', { class: 'btn btn-bloque', type: 'submit' }, editando ? 'Guardar cambios' : 'Registrar');
+      cuerpo.replaceChildren(h('form', { onsubmit: (ev) => { ev.preventDefault(); guardarCompuesto(); } },
+        campo('Tipo de transacción', tipoSel),
+        h('p', { class: 'ayuda' }, 'Para operaciones que tocan más de dos cuentas: por ejemplo, un gasto pagado parte en caja y parte en banco, o una venta repartida en varias cuentas de ingreso. Los débitos deben ser iguales a los créditos.'),
+        campo('Fecha', h('input', { type: 'date', required: true, value: st.fecha, onchange: (e) => { st.fecha = e.target.value; } })),
+        campo('Cliente o proveedor (opcional)', h('select', { value: st.tercero, onchange: (e) => { st.tercero = e.target.value; } },
+          h('option', { value: '' }, '(sin registrar)'),
+          terceros.map((t) => h('option', { value: t.id }, `${t.razon_social}${t.ruc ? ' · ' + t.ruc : ''}`))),
+        'Se anota en las líneas de clientes y de proveedores.'),
+        campo('Número de documento', h('input', { type: 'text', value: st.factura, oninput: (e) => { st.factura = e.target.value; } })),
+        campo('Descripción breve', h('input', { type: 'text', value: st.descripcion, oninput: (e) => { st.descripcion = e.target.value; } })),
+        h('div', { class: 'grupo' }, h('h3', null, 'Líneas'), ...cajas,
+          h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { st.lineas.push(nuevaLinea()); pintarForm(); } }, '+ Agregar línea')),
+        tot,
+        boton));
+      pintarTot();
+    }
+
+    // ----- Lupa: elegir la factura a la que se asigna el cobro o el pago -----
+    async function abrirLupa() {
+      if (!st.tercero) { toast('Primero elige el ' + (st.tipo === 'cobro_cliente' ? 'cliente.' : 'proveedor.'), 'error'); return; }
+      const r = await db.rpc('cartera_detalle', { p_empresa: id, p_tipo: st.tipo === 'cobro_cliente' ? 'cliente' : 'proveedor', p_fecha: st.fecha || hoyISO() });
+      if (r.error) { toast(traducirError(r.error), 'error'); return; }
+      const lista = (r.data || []).filter((x) => x.tercero_id === st.tercero)
+        .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+      let cerrarLupa;
+      const cuerpoLupa = lista.length
+        ? h('div', null,
+          h('p', { class: 'ayuda' }, 'Facturas pendientes desde la más antigua. Toca la que recibirá este ' + (st.tipo === 'cobro_cliente' ? 'cobro.' : 'pago.')),
+          ...lista.map((x) => h('button', {
+            class: 'trx', type: 'button',
+            onclick: () => {
+              st.factura = x.numero_factura || st.factura;
+              st.aplicaA = x.transaccion_id;
+              st.aplicaTxt = `${x.numero_factura || 'sin número'} (saldo ${dinero(x.saldo)})`;
+              cerrarLupa(); pintarForm();
+            }
+          },
+          h('div', { class: 'trx-linea' }, h('span', { class: 'insignia' }, x.numero_factura || 'Sin número'),
+            h('span', { class: 'ayuda' }, fechaCorta(x.fecha)), h('span', { class: 'ayuda' }, `${x.dias} días`)),
+          h('div', { class: 'trx-montos' }, h('span', { class: 'ayuda' }, `Original ${dinero(x.monto_original)}`), h('strong', null, 'Saldo ' + dinero(x.saldo))))))
+        : h('p', { class: 'ayuda' }, 'Este ' + (st.tipo === 'cobro_cliente' ? 'cliente' : 'proveedor') + ' no tiene facturas pendientes a crédito.');
+      cerrarLupa = modal('Facturas pendientes', cuerpoLupa);
     }
 
     let boton;
@@ -517,6 +675,7 @@ export async function vistaTransacciones(id) {
       const auxOk = (idAux, cta) => !idAux || (cta && auxDatos.lista.some((a) => a.id === idAux && a.cuenta_id === cta.id));
       if (!auxOk(st.auxP, cuentaPorId[st.principal])) st.auxP = '';
       if (!auxOk(st.auxC, cCon)) st.auxC = '';
+      if (st.tipo === 'compuesto') { pintarCompuesto(); return; }
 
       const etqPrincipal = {
         venta: 'Cuenta de ingreso', compra_mercancia: 'Cuenta de inventario o compras',
@@ -617,7 +776,17 @@ export async function vistaTransacciones(id) {
         campo('Fecha', h('input', { type: 'date', required: true, value: st.fecha, onchange: (e) => { st.fecha = e.target.value; } })),
         terceroSel,
         esFactura() || st.tipo === 'cobro_cliente' || st.tipo === 'pago_proveedor'
-          ? campo('Número de factura o documento', h('input', { type: 'text', value: st.factura, oninput: (e) => { st.factura = e.target.value; } }))
+          ? (['cobro_cliente', 'pago_proveedor'].includes(st.tipo)
+            ? h('div', null,
+              campo('Número de factura o documento',
+                h('div', { class: 'par-lupa' },
+                  h('input', { type: 'text', value: st.factura, oninput: (e) => { st.factura = e.target.value; } }),
+                  h('button', { class: 'btn btn-sec btn-peq', type: 'button', 'aria-label': 'Buscar factura', onclick: abrirLupa }, '🔍')),
+                'Toca la lupa para ver las facturas pendientes y escoger la que recibe este ' + (st.tipo === 'cobro_cliente' ? 'cobro.' : 'pago.')),
+              st.aplicaA ? h('p', { class: 'ayuda' }, `Asignado a la factura ${st.aplicaTxt}. `,
+                h('button', { class: 'enlace', type: 'button', onclick: () => { st.aplicaA = ''; st.aplicaTxt = ''; pintarForm(); } }, 'Quitar asignación'))
+                : h('p', { class: 'ayuda' }, 'Sin asignar: se aplica a las facturas más antiguas.'))
+            : campo('Número de factura o documento', h('input', { type: 'text', value: st.factura, oninput: (e) => { st.factura = e.target.value; } })))
           : null,
         campo('Descripción breve', h('input', { type: 'text', value: st.descripcion, oninput: (e) => { st.descripcion = e.target.value; } })),
         campo(llevaItbms() ? 'Monto bruto (sin ITBMS)' : 'Monto', brutoIn),

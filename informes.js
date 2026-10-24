@@ -19,6 +19,7 @@ const INFORMES = [
   ['mayor', 'Mayor general'],
   ['balance', 'Balance de comprobación'],
   ['hoja', 'Hoja de trabajo'],
+  ['libro', 'Libro de Ingresos y Egresos'],
   ['auxiliares', 'Auxiliares (saldos por auxiliar)']
 ];
 
@@ -212,7 +213,7 @@ export async function vistaInformes(id) {
   const est = {
     informe: 'diario', modo: 'mes', mes: hoy().slice(0, 7),
     anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues',
-    cuentaAux: '', verCeros: false
+    cuentaAux: '', verCeros: false, cuentaLibro: ''
   };
   const barra = h('div', { class: 'filtros' });
   const zona = h('div');
@@ -508,6 +509,71 @@ export async function vistaInformes(id) {
     return { nodo, spec, archivo: archivoDe('hoja-de-trabajo') };
   }
 
+  /* ---- Libro de Ingresos y Egresos: todo lo que entra y sale por caja y banco ---- */
+  async function libro() {
+    const [d, hasta] = rango();
+    const r = await db.rpc('libro_ingresos_egresos', { p_empresa: id, p_desde: d, p_hasta: hasta, p_cuenta: est.cuentaLibro || null });
+    if (r.error) throw r.error;
+    const filas = r.data || [];
+    const ant = filas.find((x) => Number(x.orden) === 0);
+    const movs = filas.filter((x) => Number(x.orden) > 0);
+    const saldoIni = ant ? Number(ant.saldo) : 0;
+    const ti = movs.reduce((a, m) => a + Number(m.ingreso || 0), 0);
+    const te = movs.reduce((a, m) => a + Number(m.egreso || 0), 0);
+    const saldoFin = movs.length ? Number(movs[movs.length - 1].saldo) : saldoIni;
+    const porConcepto = new Map();
+    movs.forEach((m) => {
+      const k = m.concepto;
+      const x = porConcepto.get(k) || { i: 0, e: 0, n: 0 };
+      x.i += Number(m.ingreso || 0); x.e += Number(m.egreso || 0); x.n += 1;
+      porConcepto.set(k, x);
+    });
+    const resumen = [...porConcepto.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const nodo = h('div', null,
+      h('p', { class: 'ayuda' }, 'Todo lo que entró y salió por caja y banco: ventas cobradas, cobros de clientes, compras, costos y gastos pagados, pagos a proveedores, otros movimientos y asientos compuestos. Las operaciones a crédito aparecen cuando se cobran o se pagan.'),
+      h('div', { class: 'resumen' },
+        chip('Saldo anterior', dinero(saldoIni)), chip('Ingresos', dinero(ti)), chip('Egresos', dinero(te)), chip('Saldo final', dinero(saldoFin))),
+      movs.length
+        ? tablaScroll(h('table', { class: 'tabla tabla-libro' },
+          h('thead', null, h('tr', null,
+            h('th', null, 'Fecha'), h('th', null, 'N.º'), h('th', null, 'Concepto'), h('th', null, 'Documento'),
+            h('th', null, 'Cliente o proveedor'), h('th', null, 'Descripción'), h('th', null, 'Cuenta'),
+            h('th', { class: 'num' }, 'Ingreso'), h('th', { class: 'num' }, 'Egreso'), h('th', { class: 'num' }, 'Saldo'))),
+          h('tbody', null,
+            h('tr', { class: 'fila-total' }, celda(''), celda(''), celda('Saldo anterior'), celda(''), celda(''), celda(''), celda(''),
+              celda(''), celda(''), celda(n2(saldoIni), 'num')),
+            movs.map((m) => h('tr', null,
+              celda(fechaCorta(m.fecha)), celda(String(m.consecutivo || '')), celda(m.concepto), celda(m.documento || ''),
+              celda(m.tercero || ''), celda(m.descripcion || ''), celda(m.cuenta || ''),
+              celda(nz(m.ingreso), 'num'), celda(nz(m.egreso), 'num'), celda(n2(m.saldo), 'num'))),
+            h('tr', { class: 'fila-total' }, celda(''), celda(''), celda('Totales y saldo final'), celda(''), celda(''), celda(''), celda(''),
+              celda(n2(ti), 'num'), celda(n2(te), 'num'), celda(n2(saldoFin), 'num')))))
+        : h('p', { class: 'ayuda' }, 'No hay movimientos de caja ni de banco en el período.'),
+      resumen.length ? h('div', null, h('h3', null, 'Resumen por concepto'),
+        tablaScroll(h('table', { class: 'tabla' },
+          h('thead', null, h('tr', null, h('th', null, 'Concepto'), h('th', { class: 'num' }, 'Movimientos'),
+            h('th', { class: 'num' }, 'Ingresos'), h('th', { class: 'num' }, 'Egresos'))),
+          h('tbody', null, resumen.map(([k, x]) => h('tr', null, celda(k), celda(String(x.n), 'num'), celda(nz(x.i), 'num'), celda(nz(x.e), 'num'))))))) : null);
+    const spec = {
+      titulo: 'Libro de Ingresos y Egresos', subtitulo: etiquetaPeriodo() + (est.cuentaLibro ? ' · ' + ((cuentas.find((c) => c.id === est.cuentaLibro) || {}).nombre || '') : ' · Caja y bancos'),
+      hoja: 'Ingresos y egresos', horizontal: true,
+      columnas: [{ t: 'Fecha', w: 1 }, { t: 'N.º', w: 0.6 }, { t: 'Concepto', w: 2 }, { t: 'Documento', w: 1.3 }, { t: 'Cliente o proveedor', w: 2 },
+        { t: 'Descripción', w: 3 }, { t: 'Cuenta', w: 2 }, { t: 'Ingreso', num: true }, { t: 'Egreso', num: true }, { t: 'Saldo', num: true }],
+      filas: [
+        { c: ['', '', 'Saldo anterior', '', '', '', '', null, null, redondear(saldoIni)], e: 'grupo' },
+        ...movs.map((m) => ({ c: [fechaCorta(m.fecha), String(m.consecutivo || ''), m.concepto, m.documento || '', m.tercero || '',
+          m.descripcion || '', m.cuenta || '', nulo0(m.ingreso), nulo0(m.egreso), Number(m.saldo)] })),
+        { c: ['', '', 'Totales y saldo final', '', '', '', '', redondear(ti), redondear(te), redondear(saldoFin)], e: 'total' }]
+    };
+    const spec2 = {
+      titulo: 'Libro de Ingresos y Egresos: resumen por concepto', subtitulo: etiquetaPeriodo(), hoja: 'Resumen por concepto',
+      columnas: [{ t: 'Concepto', w: 3 }, { t: 'Movimientos', num: true }, { t: 'Ingresos', num: true }, { t: 'Egresos', num: true }],
+      filas: [...resumen.map(([k, x]) => ({ c: [k, x.n, nulo0(x.i), nulo0(x.e)] })),
+        { c: ['Totales', movs.length, redondear(ti), redondear(te)], e: 'total' }]
+    };
+    return { nodo, spec, specs: [spec, spec2], archivo: archivoDe('ingresos-egresos') };
+  }
+
   /* ---- auxiliares ---- */
   async function auxiliares() {
     if (auxDatos.falta) throw new Error('Falta ejecutar el archivo 77 en Supabase para usar auxiliares.');
@@ -518,7 +584,7 @@ export async function vistaInformes(id) {
     });
   }
 
-  const construir = { diario, mayor, balance, hoja, auxiliares };
+  const construir = { diario, mayor, balance, hoja, libro, auxiliares };
 
   async function pintar() {
     zona.replaceChildren(cargando());
@@ -568,6 +634,11 @@ export async function vistaInformes(id) {
         h('option', { value: '2' }, 'Hasta nivel 2'),
         h('option', { value: '3' }, 'Hasta nivel 3'),
         h('option', { value: '4' }, 'Todas las cuentas (nivel 4)')));
+    }
+    if (est.informe === 'libro') {
+      extra.push(h('select', { value: est.cuentaLibro, onchange: (e) => { est.cuentaLibro = e.target.value; pintar(); } },
+        h('option', { value: '' }, 'Caja y todos los bancos'),
+        cuentas.filter((c) => c.numero.startsWith('1.1.01.')).map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))));
     }
     if (est.informe === 'auxiliares') {
       const conAux = [...new Set(auxDatos.lista.map((a) => a.cuenta_id))];
