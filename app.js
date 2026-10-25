@@ -442,6 +442,36 @@ async function vistaCatalogo(id) {
     h('option', { value: '' }, 'Todos los tipos'), opciones(TIPOS, false));
   const soloAnexo = h('input', { type: 'checkbox', onchange: (e) => { filtro.anexo = e.target.checked; pintar(); } });
 
+  // Catálogo maestro (script 92): todas las empresas parten del mismo catálogo, con sus renglones y anexos de la DR
+  const caja = h('div', { class: 'cat-maestro tarjeta' });
+  function bloqueMaestro() {
+    if (!(empresa.rol === 'admin' || empresa.rol === 'contador')) return null;
+    caja.replaceChildren(
+      h('h3', null, 'Catálogo maestro'),
+      h('p', { class: 'ayuda' }, 'Las empresas nuevas nacen con el catálogo maestro: mismas cuentas, números de renglón y anexos de la declaración de renta y auxiliar S001. Para esta empresa, "Traer del maestro" agrega las cuentas que le falten y completa los renglones y anexos vacíos. No cambia lo que ya escribiste.'),
+      h('div', { class: 'acciones' },
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: sincronizarMaestro }, 'Traer del maestro')));
+    db.rpc('es_admin_plantilla').then((r) => {
+      if (r.error || r.data !== true) return;
+      caja.querySelector('.acciones').append(
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: publicarMaestro }, 'Publicar este catálogo como maestro'));
+    });
+    return caja;
+  }
+  async function sincronizarMaestro() {
+    const { data, error } = await db.rpc('sincronizar_catalogo_maestro', { p_empresa: id });
+    if (error) { toast(/sincronizar_catalogo_maestro/.test(String(error.message)) ? 'Falta ejecutar el script 92 en Supabase.' : traducirError(error), 'error'); return; }
+    toast(`Listo: ${data.cuentas_nuevas} cuenta(s) nueva(s), ${data.renglones_o_anexos} renglón(es) o anexo(s) completados, ${data.nombres || 0} nombre(s).`, 'ok');
+    await recargar();
+  }
+  async function publicarMaestro() {
+    if (!confirm('Este catálogo pasa a ser el maestro. Las empresas nuevas lo tendrán igual, y a las actuales se les agregan las cuentas que falten y se completan renglones y anexos vacíos. ¿Publicar?')) return;
+    const { data, error } = await db.rpc('publicar_catalogo_maestro', { p_empresa: id });
+    if (error) { toast(traducirError(error), 'error'); return; }
+    toast(`Maestro publicado: ${data.cuentas_maestro} cuentas; ${data.empresas} empresa(s) al día.`, 'ok');
+    await recargar();
+  }
+
   pintar();
   mostrar(marcoEmpresa(empresa, 'catalogo', [
     h('div', { class: 'filtros' }, buscar, tipo,
@@ -449,7 +479,8 @@ async function vistaCatalogo(id) {
     contador,
     lista,
     h('div', { class: 'acciones' },
-      h('button', { class: 'btn', type: 'button', onclick: nuevaCuenta }, '+ Nueva cuenta'))
+      h('button', { class: 'btn', type: 'button', onclick: nuevaCuenta }, '+ Nueva cuenta')),
+    bloqueMaestro()
   ]));
 }
 

@@ -1,7 +1,8 @@
 // Declaración de Renta (persona natural): formulario de la DGI con los renglones 1 a 128,
 // vista anual. Cada cuenta del catálogo se asigna a un renglón (Catálogo > Renglón de la
-// declaración, o desde la observación al pie de esta pantalla). Cualquier línea se puede
-// escribir a mano (lápiz). Totales, impuestos y deducciones calculadas: etapa posterior.
+// declaración, o desde la observación al pie de esta pantalla). Totales, renta gravable,
+// impuesto, seguro educativo, CSS y partidas salen de las fórmulas de la base de datos (script 93).
+// Cualquier línea se puede escribir a mano (lápiz) y las fórmulas siguientes usan ese monto.
 import {
   db, h, mostrar, toast, modal, campo, texto, traducirError, cargando,
   marcoEmpresa, cargarEmpresa, hoy
@@ -10,6 +11,9 @@ import { barraExportar } from './informes.js';
 import { n2 } from './exportar.js';
 
 const NUM = (v) => Number(v || 0);
+const TITULO_DGI = 'DIRECCION GENERAL DE INGRESOS';
+const TITULO_FORM = 'DECLARACIÓN JURADA DE RENTAS PERSONAS NATURALES, ASALARIADOS, PROFESIONALES INDEPENDIENTES Y COMERCIANTES';
+const TITULO_VERSION = 'Formulario 1 V: 8 NATURAL';
 const TIPOS = {
   activo: 'Activo', pasivo: 'Pasivo', patrimonio: 'Patrimonio', ingreso: 'Ingreso',
   costo: 'Costo', gasto: 'Gasto', extraordinario: 'Extraordinario'
@@ -17,11 +21,10 @@ const TIPOS = {
 
 // Especificaciones para Excel y PDF
 function specsRenta({ filas, base, obs, anio, empresa }) {
-  const sub = `Persona natural · Año ${anio} · Sector o Clase: NATURAL · D.E. 251 Estado de Emergencia Nacional: NO`;
+  const sub = `${TITULO_DGI} · ${TITULO_FORM} · ${TITULO_VERSION} · Año ${anio}`;
   const f = filas.map((x) => {
     if (x.fila === 'seccion') return { c: [x.descripcion, null, null, null], e: 'grupo' };
-    const monto = x.manual ? NUM(x.monto) : (x.fila === 'captura' && x.cuentas > 0 ? NUM(x.monto) : null);
-    return { c: [x.descripcion + (x.manual ? ' (manual)' : ''), x.renglon == null ? '' : String(x.renglon), x.anexos || '', monto], e: x.fila === 'calculo' ? 'total' : 'normal' };
+    return { c: [x.descripcion + (x.manual ? ' (manual)' : ''), x.renglon == null ? '' : String(x.renglon), x.anexos || '', NUM(x.monto)], e: x.fila === 'calculo' ? 'total' : 'normal' };
   });
   const out = [{
     titulo: `Declaración de Renta ${anio}`,
@@ -30,8 +33,9 @@ function specsRenta({ filas, base, obs, anio, empresa }) {
     columnas: [{ t: 'Descripción', w: 6 }, { t: 'Renglón', w: 1 }, { t: 'Anexo', w: 1 }, { t: 'Monto', num: true }],
     filas: f,
     notas: ['Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre.',
-      'Los renglones resaltados son de fórmula y quedan sin monto hasta la siguiente etapa, salvo los escritos a mano.',
-      'Las líneas marcadas (manual) tienen un monto escrito a mano que reemplaza al de las cuentas. Los renglones "Menos:" van en positivo.']
+      'Los renglones resaltados salen de fórmulas: totales, renta gravable, impuesto causado, seguro educativo, cuota de la CSS y partidas.',
+      'Las líneas marcadas (manual) tienen un monto escrito a mano que reemplaza al calculado. Los renglones "Menos:" van en positivo.',
+      'Impuesto causado (102 y 113): (renta neta gravable - 11,000.00) x 15 %. Seguro educativo: 2.75 %. CSS: línea 8 x 52 % x 13.50 %.']
   }];
   const det = base.filter((b) => b.valido && b.renglon != null)
     .sort((a, b) => a.renglon - b.renglon || String(a.numero).localeCompare(String(b.numero), 'es', { numeric: true }));
@@ -99,7 +103,7 @@ export async function vistaRenta(id) {
       est.filas = []; est.base = []; est.obs = [];
       cuerpo.replaceChildren(h('div', { class: 'tarjeta error' }, h('p', null,
         /dr_declaracion|dr_base|dr_plantilla/.test(String(e && e.message))
-          ? 'Falta ejecutar el script 81 en Supabase (Declaración de renta).' : traducirError(e))));
+          ? 'Falta ejecutar los scripts 81 y 93 en Supabase (Declaración de renta).' : traducirError(e))));
     }
   }
 
@@ -224,6 +228,16 @@ export async function vistaRenta(id) {
         : h('p', { class: 'ayuda' }, 'Ninguna cuenta tiene este renglón todavía. Asígnalo en Catálogo o desde la observación al pie.')));
   }
 
+  function ayudaRenglon(f) {
+    const titulo = f.renglon == null ? f.descripcion : `Renglón ${f.renglon} · ${f.descripcion}`;
+    modal(titulo, h('div', null,
+      h('p', null, h('strong', null, 'Monto: '), n2(f.monto), f.manual ? ' (escrito a mano)' : ''),
+      f.manual ? h('p', { class: 'ayuda' }, `Calculado por la fórmula: ${n2(f.monto_auto)}.${f.nota ? ' Nota: ' + f.nota : ''}`) : null,
+      f.formula ? h('p', null, h('strong', null, 'Fórmula: '), f.formula) : null,
+      f.ayuda ? h('p', { class: 'ayuda dr-ayuda' }, f.ayuda) : null,
+      puedeAsignar ? h('button', { class: 'btn btn-sec btn-bloque', type: 'button', onclick: () => editarMonto(f) }, 'Escribir el monto a mano') : null));
+  }
+
   function editarMonto(f) {
     const monto = h('input', { type: 'number', step: '0.01', inputmode: 'decimal', placeholder: '0.00',
       value: f.manual ? String(f.monto) : '' });
@@ -248,7 +262,7 @@ export async function vistaRenta(id) {
       h('form', { onsubmit: (ev) => guardar(ev, false) },
         f.fila === 'captura'
           ? h('p', { class: 'ayuda' }, `Según las cuentas: ${n2(f.monto_auto)}. Si escribes un monto aquí, reemplaza al de las cuentas para ${est.anio}.`)
-          : h('p', { class: 'ayuda' }, `Este renglón saldrá de una fórmula. Puedes escribir el monto a mano para ${est.anio}.`),
+          : h('p', { class: 'ayuda' }, `Este renglón sale de una fórmula${f.formula ? ' (' + f.formula + ')' : ''}: ${n2(f.monto_auto)}. Si escribes un monto aquí, lo reemplaza para ${est.anio} y las líneas que dependen de él lo usan.`),
         campo('Monto (B/.)', monto),
         campo('Nota', nota),
         h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Guardar'),
@@ -260,15 +274,17 @@ export async function vistaRenta(id) {
     if (f.fila === 'seccion') {
       return h('tr', { class: 'dr-seccion' }, h('td', { colspan: '4' }, f.descripcion));
     }
-    const clic = f.fila === 'captura' && f.cuentas > 0;
-    const hay = f.manual || (f.fila === 'captura' && f.cuentas > 0);
+    const clic = (f.fila === 'captura' && f.cuentas > 0) || f.fila === 'calculo';
+    const hay = true;
     const lapiz = puedeAsignar
       ? h('button', { class: 'dr-lapiz' + (f.manual ? ' activo' : ''), type: 'button', 'aria-label': 'Editar monto',
         onclick: (ev) => { ev.stopPropagation(); editarMonto(f); } }, '✎')
       : null;
     return h('tr', { class: 'dr-fila' + (f.fila === 'calculo' ? ' dr-calculo' : '') + (clic ? ' dr-clic' : ''),
-      onclick: clic ? () => detalleRenglon(f) : null },
-      h('td', null, f.descripcion, f.manual && f.nota ? h('div', { class: 'ayuda' }, f.nota) : null),
+      onclick: clic ? () => (f.fila === 'calculo' ? ayudaRenglon(f) : detalleRenglon(f)) : null },
+      h('td', null, f.descripcion,
+        f.fila === 'calculo' && f.formula && f.formula !== 'A mano' ? h('div', { class: 'ayuda dr-formula' }, `= ${f.formula}`) : null,
+        f.manual && f.nota ? h('div', { class: 'ayuda' }, f.nota) : null),
       h('td', { class: 'centro' }, f.renglon == null ? '' : h('span', { class: 'dr-pildora' }, String(f.renglon))),
       h('td', { class: 'centro' }, f.anexos || ''),
       h('td', { class: 'num' + (f.manual ? ' dr-manual' : '') }, hay ? n2(f.monto) : '', lapiz));
@@ -276,7 +292,7 @@ export async function vistaRenta(id) {
 
   function asignar(cuentas) {
     const sugerido = cuentas.length === 1 ? sugerirRenglon(cuentas[0]) : '';
-    const caps = est.filas.filter((x) => x.fila === 'captura');
+    const caps = est.filas.filter((x) => x.fila === 'captura' || x.renglon === 82);
     const secciones = [];
     for (const x of caps) {
       let g = secciones.find((s) => s.t === x.seccion);
@@ -351,11 +367,11 @@ export async function vistaRenta(id) {
         h('th', { class: 'centro' }, 'Anexo'), h('th', { class: 'num' }, 'Monto'))),
       h('tbody', null, est.filas.map(filaTabla))));
     cuerpo.replaceChildren(
-      h('div', { class: 'tarjeta dr-cabecera' },
-        h('div', null, h('span', { class: 'ayuda' }, 'Formulario'), h('strong', null, 'Persona natural')),
-        h('div', null, h('span', { class: 'ayuda' }, 'Sector o Clase'), h('strong', { class: 'dr-cursiva' }, 'NATURAL')),
-        h('div', null, h('span', { class: 'ayuda' }, 'D.E. 251 Estado de Emergencia Nacional'), h('strong', { class: 'dr-cursiva' }, 'NO'))),
-      h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre. Toca un renglón con monto para ver sus cuentas. El lápiz ✎ permite escribir el monto a mano (reemplaza al de las cuentas y se puede quitar). Los renglones resaltados son de fórmula y todavía no tienen monto, salvo los que escribas a mano. Los renglones "Menos:" van en positivo.'),
+      h('div', { class: 'tarjeta dr-encabezado' },
+        h('div', { class: 'dr-dgi' }, TITULO_DGI),
+        h('div', { class: 'dr-titulo-form' }, TITULO_FORM),
+        h('div', { class: 'dr-version' }, TITULO_VERSION)),
+      h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo y pasivo: saldo al 31 de diciembre. Toca un renglón con cuentas para verlas, o un renglón de fórmula para ver cómo se calcula. El lápiz ✎ permite escribir el monto a mano (reemplaza al calculado, se puede quitar y las líneas siguientes lo usan). Los renglones "Menos:" van en positivo. Los renglones sin fórmula (103, 105 a 107, 109, 119, 120 y los incentivos) se escriben a mano; el 103 se resta en la 110 y la 111.'),
       tabla,
       bloqueObservacion(),
       bloqueAprobacion());
