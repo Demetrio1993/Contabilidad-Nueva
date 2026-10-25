@@ -233,6 +233,7 @@ export async function vistaInformes(id) {
 
   /* ---- diario ---- */
   function accionesAsiento(a, ls) {
+    if (empresa.rol === 'lector') return null;   // el lector solo consulta
     const manual = ['manual', 'ajuste', 'apertura'].includes(a.origen);
     const esAnulacion = a.origen === 'ajuste' && String(a.referencia || '').startsWith('ANULA-');
     if (!manual) {
@@ -342,7 +343,7 @@ export async function vistaInformes(id) {
             toast('Asientos numerados en orden de fecha.', 'ok'); pintar();
           } }, 'Ordenar números por fecha')
           : h('p', { class: 'ayuda' }, 'Pídele al administrador o al contador que los ordene.')) : null,
-      h('div', { class: 'acciones' },
+      empresa.rol === 'lector' ? null : h('div', { class: 'acciones' },
         h('button', { class: 'btn', type: 'button', onclick: () => abrirAjuste(id, cuentas, rango()[1], pintar) }, '+ Asiento de ajuste')),
       data.length ? tarjetas : h('p', { class: 'ayuda' }, 'No hay asientos en este período.'));
     const spec = data.length ? {

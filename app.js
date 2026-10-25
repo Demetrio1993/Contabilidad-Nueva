@@ -1,7 +1,7 @@
 // Contabilidad-Nueva · acceso, empresas, catálogo de cuentas y enrutador
 import {
   db, estado, h, toast, modal, mostrar, irA, texto, traducirError, campo, cargando,
-  errorVista, marco, bloqueMarca, marcoEmpresa, cargarEmpresa, cargarRol, pestanaPermitida
+  errorVista, marco, bloqueMarca, marcoEmpresa, cargarEmpresa, cargarRol, pestanaPermitida, pestanaInicial
 } from './lib.js';
 import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
@@ -501,7 +501,8 @@ async function render() {
     if (p[0] === 'empresa' && p[1]) {
       const id = p[1];
       const mi = await cargarRol(id);
-      if (!pestanaPermitida(mi.rol, mi.permisos, p[2] || 'transacciones')) { irA(`#/empresa/${id}/transacciones`); return; }
+      if (!pestanaPermitida(mi.rol, mi.permisos, p[2] || pestanaInicial(mi.rol))) { irA(`#/empresa/${id}/${pestanaInicial(mi.rol)}`); return; }
+      if (!p[2] && mi.rol === 'lector') { irA(`#/empresa/${id}/panel`); return; }
       if (p[2] === 'catalogo') await vistaCatalogo(id);
       else if (p[2] === 'informes') await vistaInformes(id);
       else if (p[2] === 'estados') await vistaEstados(id);

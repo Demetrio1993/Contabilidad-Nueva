@@ -103,7 +103,7 @@ async function seccionItbms(id, empresa, zona) {
           h('p', null, 'Probablemente hay asientos manuales en las cuentas de ITBMS. Revisa el diario del mes.')) : null,
         tablaSimple([{ t: 'Concepto' }, { t: 'Monto', num: true }],
           est.rows.map((x) => ({ c: [x.concepto, NUM(x.monto)], e: E_ITBMS[x.fila] || 'normal' })), 'estado'),
-        h('div', { class: 'acciones' },
+        empresa.rol === 'lector' ? null : h('div', { class: 'acciones' },
           h('button', { class: 'btn btn-sec', type: 'button', onclick: () => abrirManual(id, est.anio, est.mes, pintar) },
             'Cifras manuales del mes'))].filter(Boolean));
     } catch (e) {

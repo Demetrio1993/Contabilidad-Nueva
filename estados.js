@@ -302,12 +302,12 @@ export async function vistaEstados(id) {
           h('thead', null, h('tr', null, h('th', null, 'Concepto'), h('th', { class: 'num' }, String(est.anio)), h('th', { class: 'num' }, String(est.anio - 1)))),
           h('tbody', null, det.map((r) => h('tr', { class: 'fila-' + r.fila },
             h('td', null, r.concepto), h('td', { class: 'num' }, n2(r.actual)), h('td', { class: 'num' }, n2(r.anterior))))))) : null,
-        h('div', { class: 'acciones' }, h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => abrirNota(n) }, 'Editar texto')));
+        empresa.rol === 'lector' ? null : h('div', { class: 'acciones' }, h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => abrirNota(n) }, 'Editar texto')));
     });
     return {
       nodo: h('div', null,
-        h('div', { class: 'acciones' }, generar),
-        notas.length ? tarjetas : h('p', { class: 'ayuda' }, 'Todavía no hay notas para este año. Toca "Generar notas" para crearlas con los datos de la empresa; después puedes editar el texto.')),
+        empresa.rol === 'lector' ? null : h('div', { class: 'acciones' }, generar),
+        notas.length ? tarjetas : h('p', { class: 'ayuda' }, empresa.rol === 'lector' ? 'Todavía no hay notas para este año.' : 'Todavía no hay notas para este año. Toca "Generar notas" para crearlas con los datos de la empresa; después puedes editar el texto.')),
       spec: notas.length ? specNotas(notas, detalles, est.anio) : null
     };
   }
@@ -318,7 +318,7 @@ export async function vistaEstados(id) {
     const hay = rows.some((r) => r.fila === 'detalle');
     const fiscal = tipo === 'balance' ? await cargarCierreFiscal(id, est.anio) : null;
     const nodo = h('div', null,
-      h('div', { class: 'acciones' },
+      empresa.rol === 'lector' ? null : h('div', { class: 'acciones' },
         h('button', { class: 'btn btn-sec', type: 'button', onclick: () => abrirAnteriores(tipo, rows).catch((er) => toast(traducirError(er), 'error')) }, `Cifras del año ${est.anio - 1}`)),
       avisoControl(rows),
       hay ? tablaEstado(tipo, rows) : h('p', { class: 'ayuda' }, 'No hay cifras para este año. Registra transacciones y, si ya terminó el año, haz el cierre anual.'),

@@ -10,7 +10,7 @@ if (!window.supabase) {
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
 // Número de versión que se muestra al pie. La descripción de cada versión es solo interna (manual y memoria).
-export const VERSION = '39';
+export const VERSION = '40';
 // Versión 31: catálogo reorganizado (gastos de operación y financieros), auxiliares por cuenta y cuadros con todos los montos.
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
@@ -132,8 +132,15 @@ export function marco(...contenido) {
     h('footer', { class: 'pie' }, 'Versión ' + VERSION));
 }
 
+// Perfil Lector: solo consulta. Solo ve estas pestañas; cualquier pantalla nueva queda oculta para él
+// hasta que se agregue aquí a propósito. Dentro de ellas no registra, edita, anula ni elimina.
+export const PESTANAS_LECTOR = ['panel', 'informes', 'estados', 'presupuesto', 'impuestos', 'renta', 'cartera', 'analisis'];
+export const esLector = (rol) => rol === 'lector';
+export const pestanaInicial = (rol) => (rol === 'lector' ? 'panel' : 'transacciones');
+
 // El auxiliar solo ve Transacciones (y Clientes y prov. si el administrador se lo habilitó)
 export function pestanaPermitida(rol, permisos, clave) {
+  if (rol === 'lector') return PESTANAS_LECTOR.includes(clave);
   if (rol !== 'auxiliar') return true;
   return clave === 'transacciones' || clave === 'terceros';
 }
