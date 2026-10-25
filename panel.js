@@ -70,6 +70,14 @@ async function cargarGastosRubro(id, anio) {
 }
 
 
+// Saldo de todas las cuentas cuyo número empieza con alguno de los prefijos: [año, año anterior]
+const saldoCuentas = (rows, prefijos) => rows.filter((x) => x.fila === 'detalle' && x.numero && prefijos.some((q) => x.numero.startsWith(q)))
+  .reduce((s, x) => [s[0] + NUM(x.actual), s[1] + NUM(x.anterior)], [0, 0]);
+// Por cobrar: todas las cuentas por cobrar (1.1.02 comerciales, 1.1.03 otras y 1.1.04 provisión de incobrables, que resta).
+// Por pagar: todos los pasivos, corrientes y no corrientes (cuentas 2.), incluye impuestos, seguro educativo y préstamos.
+const porCobrarSaldo = (d) => saldoCuentas(d.balance, ['1.1.02', '1.1.03', '1.1.04']);
+const porPagarSaldo = (d) => saldoCuentas(d.balance, ['2.']);
+
 const anioContra = (d, i) => [ingresosTotal(d.resultados)[i], valor(d.resultados, 2950)[i], valor(d.resultados, 4950)[i], valor(d.resultados, 11000)[i]];
 
 // Cifras clave en el orden pedido. Seguro educativo e impuesto salen del estado de resultados.
@@ -78,7 +86,7 @@ function porConcepto(rows, texto) {
   const f = rows.find((x) => x.fila === 'detalle' && String(x.concepto || '').toLowerCase().startsWith(texto));
   return [NUM(f && f.actual), NUM(f && f.anterior)];
 }
-function cifrasClave(d, cxc, cxp) {
+function cifrasClave(d) {
   const gas = [4950, 7950, 8950].map((o) => valor(d.resultados, o));
   const gastos = [gas.reduce((a, x) => a + x[0], 0), gas.reduce((a, x) => a + x[1], 0)];
   const lista = [
@@ -91,8 +99,8 @@ function cifrasClave(d, cxc, cxp) {
     ['Seguro educativo (DGI)', 'Seg. educ.', ...porConcepto(d.resultados, 'seguro educativo')],
     ['Impuesto sobre la renta (DGI)', 'Imp. renta', ...porConcepto(d.resultados, 'impuesto sobre la renta')],
     ['Utilidad neta', 'Utilidad neta', ...valor(d.resultados, 11000)],
-    ['Por cobrar', 'Por cobrar', cxc.total, null],
-    ['Por pagar', 'Por pagar', cxp.total, null]
+    ['Por cobrar', 'Por cobrar', ...porCobrarSaldo(d)],
+    ['Por pagar', 'Por pagar', ...porPagarSaldo(d)]
   ];
   return lista.map(([nombre, corto, a, b], i) => ({ nombre, corto, a, b, color: COLORES_CIFRAS[i] }));
 }
@@ -115,10 +123,10 @@ function redactar(anio, d, razones, cxc, cxp) {
     : `El año cerró con una pérdida neta de ${dinero(Math.abs(un))}` + (unA ? ` (año anterior: ${dinero(unA)}).` : '.'));
   frases.push(`Al cierre el activo total es ${dinero(ta)}, con pasivos de ${dinero(tp)} y patrimonio de ${dinero(pat)}.`);
   if (cxc.total > 0) {
-    frases.push(`Los clientes deben ${dinero(cxc.total)}` + (cxc.vencida > 0 ? `, de los cuales ${dinero(cxc.vencida)} llevan más de 90 días.` : ', y nada pasa de 90 días.'));
+    frases.push(`Las cuentas por cobrar suman ${dinero(cxc.total)}` + (cxc.vencida > 0 ? `; ${dinero(cxc.vencida)} de facturas a clientes llevan más de 90 días.` : '; ninguna factura a clientes pasa de 90 días.'));
   }
   if (cxp.total > 0) {
-    frases.push(`Se debe a proveedores ${dinero(cxp.total)}` + (cxp.vencida > 0 ? `, de los cuales ${dinero(cxp.vencida)} llevan más de 90 días.` : ', y nada pasa de 90 días.'));
+    frases.push(`Las cuentas por pagar suman ${dinero(cxp.total)} (todos los pasivos)` + (cxp.vencida > 0 ? `; ${dinero(cxp.vencida)} de facturas de proveedores llevan más de 90 días.` : '; ninguna factura de proveedores pasa de 90 días.'));
   }
   if (ctl && (Math.abs(NUM(ctl.actual)) > 0.005 || Math.abs(NUM(ctl.anterior)) > 0.005)) {
     frases.push('Atención: el balance general no cuadra. Revisa los asientos antes de usar estas cifras.');
@@ -136,7 +144,7 @@ function specResumen(empresa, anio, d, razones, frases, graficas, cifras) {
     titulo: 'Resumen ejecutivo', subtitulo: `Año ${anio}`, hoja: 'Resumen ejecutivo',
     columnas: [{ t: 'Indicador', w: 1 }, { t: String(anio), num: true }, { t: String(anio - 1), num: true }, { t: 'Variación', num: true }],
     filas,
-    notas: frases.concat(['Por cobrar y por pagar son los saldos a la fecha de corte; no se comparan con el año anterior.']),
+    notas: frases.concat(['Por cobrar suma todas las cuentas por cobrar (comerciales, otras y la provisión de incobrables, que resta); por pagar suma todos los pasivos, corrientes y no corrientes, incluidos impuestos, seguro educativo y préstamos.']),
     graficas: graficas || []
   };
 }
@@ -167,13 +175,13 @@ export async function vistaPanel(id) {
         return;
       }
       const razones = calcularRazones(d.balance, d.resultados);
-      const frases = redactar(est.anio, d, razones, cxc, cxp);
+      const frases = redactar(est.anio, d, razones, { ...cxc, total: porCobrarSaldo(d)[0] }, { ...cxp, total: porPagarSaldo(d)[0] });
       const [tp0] = valor(d.balance, 6000);
-      const cifras = cifrasClave(d, cxc, cxp);
+      const cifras = cifrasClave(d);
       const graficasPdf = [
         { tipo: 'barras', titulo: `Cifras clave, ${est.anio}`, etiquetas: cifras.map((x) => x.corto), nombres: cifras.map((x) => x.nombre),
           series: [{ nombre: String(est.anio), valores: cifras.map((x) => x.a), color: '#2a78d6', colores: cifras.map((x) => x.color) }],
-          nota: 'Montos en balboas. Por cobrar y por pagar al corte.' },
+          nota: 'Montos en balboas. Por cobrar y por pagar: saldos de todas sus cuentas al cierre.' },
         { tipo: 'barras', titulo: `Ingresos, gastos y utilidad por mes, ${est.anio}`, etiquetas: MESES,
           series: [{ nombre: 'Ingresos', valores: mensual.map((m) => m.ingresos), color: '#2a78d6' },
             { nombre: 'Gastos y costos', valores: mensual.map((m) => m.gastos), color: '#eb6834' }],
