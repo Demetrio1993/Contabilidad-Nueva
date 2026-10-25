@@ -35,7 +35,8 @@ function specsRenta({ filas, base, obs, anio, empresa }) {
     notas: ['Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre.',
       'Los renglones resaltados salen de fórmulas: totales, renta gravable, impuesto causado, seguro educativo, cuota de la CSS y partidas.',
       'Las líneas marcadas (manual) tienen un monto escrito a mano que reemplaza al calculado. Los renglones "Menos:" van en positivo.',
-      'Impuesto causado (102 y 113): (renta neta gravable - 11,000.00) x 15 %. Seguro educativo: 2.75 %. CSS: línea 8 x 52 % x 13.50 %.']
+      'Impuesto causado (102 y 113): (renta neta gravable - 11,000.00) x 15 %. Seguro educativo: 2.75 %. CSS: solo si la línea 8 pasa de 9,600.00; 52 % (48 % si es la única retribución y no supera los 35 años) x 13.50 %; partidas de la CSS en 0.00.',
+      'PREINFORME: esta declaración es un preinforme y los montos podrían cambiar hasta su presentación ante la DGI.']
   }];
   const det = base.filter((b) => b.valido && b.renglon != null)
     .sort((a, b) => a.renglon - b.renglon || String(a.numero).localeCompare(String(b.numero), 'es', { numeric: true }));
@@ -76,7 +77,7 @@ export async function vistaRenta(id) {
   const empresa = await cargarEmpresa(id);
   const puedeAsignar = empresa.rol === 'admin' || empresa.rol === 'contador';
   const esLector = empresa.rol === 'lector';
-  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set(), aprob: [], aprobFalta: false, confirma: false, nota: '' };
+  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set(), aprob: [], aprobFalta: false, confirma: false, nota: '', menor35: false, opcFalta: false };
   const cuerpo = h('div');
   const anio = h('input', {
     type: 'number', min: '2000', max: '2100', inputmode: 'numeric', value: String(est.anio),
@@ -86,12 +87,15 @@ export async function vistaRenta(id) {
   async function cargar() {
     cuerpo.replaceChildren(cargando());
     try {
-      const [d, b, o, pl] = await Promise.all([
+      const [d, b, o, pl, op] = await Promise.all([
         db.rpc('dr_declaracion', { p_empresa: id, p_anio: est.anio }),
         db.rpc('dr_base', { p_empresa: id, p_anio: est.anio }),
         db.rpc('dr_sin_renglon', { p_empresa: id, p_anio: est.anio }),
-        db.from('dr_plantilla').select('renglon, lado, tipos').eq('formulario', 'natural').not('renglon', 'is', null)
+        db.from('dr_plantilla').select('renglon, lado, tipos').eq('formulario', 'natural').not('renglon', 'is', null),
+        db.from('dr_opciones').select('menor_35').eq('empresa_id', id).eq('anio', est.anio).maybeSingle()
       ]);
+      est.opcFalta = !!op.error;
+      est.menor35 = !!(op.data && op.data.menor_35);
       for (const r of [d, b, o, pl]) if (r.error) throw r.error;
       const lados = new Map((pl.data || []).map((x) => [x.renglon, x]));
       est.filas = (d.data || []).map((x) => ({ ...x, lado: lados.has(x.renglon) ? lados.get(x.renglon).lado : null }));
@@ -335,6 +339,32 @@ export async function vistaRenta(id) {
     return por[c.tipo] || '';
   }
 
+  // Opción para la línea 122 (cuota de la CSS): edad del contribuyente
+  async function cambiarEdad(marcado) {
+    const { error } = await db.rpc('dr_guardar_opcion', { p_empresa: id, p_anio: est.anio, p_menor_35: marcado });
+    if (error) { toast(traducirError(error), 'error'); await cargar(); return; }
+    toast('Guardado. Se recalculó la cuota de la CSS.', 'ok');
+    await cargar();
+  }
+
+  function bloqueCss() {
+    if (est.opcFalta) {
+      return puedeAsignar ? h('div', { class: 'tarjeta error' }, h('p', null, 'Falta ejecutar el script 95 en Supabase (cuota de la CSS).')) : null;
+    }
+    const check = h('input', { type: 'checkbox', checked: est.menor35, disabled: !puedeAsignar,
+      onchange: (e) => cambiarEdad(e.target.checked) });
+    return h('div', { class: 'tarjeta' },
+      h('h3', null, `Cuota de la CSS ${est.anio}`),
+      h('label', { class: 'fila-check' }, check, h('span', null, 'El contribuyente no supera los 35 años')),
+      h('p', { class: 'ayuda' }, 'Los honorarios de la línea 8 deben pasar de B/. 9,600.00; si no, no se calcula la cuota (líneas 122 y 123). Si son la única retribución de ingresos y el contribuyente no supera los 35 años, se aplica el 48 % a la línea 8; en los demás casos, el 52 %. La cuota se paga completa al presentar la declaración, por eso las partidas de la CSS quedan en 0.00.'));
+  }
+
+  function bloquePreinforme() {
+    return h('div', { class: 'tarjeta dr-preinforme' },
+      h('h3', null, 'Preinforme'),
+      h('p', null, 'Esta declaración es un preinforme. Los montos podrían cambiar hasta que se presente ante la DGI, por nuevos registros, ajustes, cuentas sin renglón o revisión del contador.'));
+  }
+
   function bloqueObservacion() {
     const conMov = est.obs.filter((o) => o.movimientos > 0 || NUM(o.saldo) !== 0);
     const lista = est.sinMov ? est.obs : conMov;
@@ -373,8 +403,10 @@ export async function vistaRenta(id) {
         h('div', { class: 'dr-version' }, TITULO_VERSION)),
       h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo y pasivo: saldo al 31 de diciembre. Toca un renglón con cuentas para verlas, o un renglón de fórmula para ver cómo se calcula. El lápiz ✎ permite escribir el monto a mano (reemplaza al calculado, se puede quitar y las líneas siguientes lo usan). Los renglones "Menos:" van en positivo. Los renglones sin fórmula (103, 105 a 107, 109, 119, 120 y los incentivos) se escriben a mano; el 103 se resta en la 110 y la 111.'),
       tabla,
+      bloqueCss(),
       bloqueObservacion(),
-      bloqueAprobacion());
+      bloqueAprobacion(),
+      bloquePreinforme());
   }
 
   mostrar(marcoEmpresa(empresa, 'renta', [
