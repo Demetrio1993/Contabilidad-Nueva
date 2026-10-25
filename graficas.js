@@ -136,4 +136,21 @@ export function barrasH({ titulo, items, nota, color }) {
     tabla(items.map((x) => x.nombre), [{ nombre: 'Monto', valores: items.map((x) => x.valor) }]));
 }
 
+// Convierte una gráfica descrita para PDF y Excel (colores en hex) en la gráfica de pantalla.
+// Una sola serie con colores por barra se muestra como barras horizontales con nombre completo.
+export function graficaDeSpec(g) {
+  if (g.tipo === 'dona') return dona({ titulo: g.titulo, items: g.items, centro: g.centro, nota: g.nota });
+  const una = g.series && g.series.length === 1 && g.series[0].colores && !g.linea;
+  if (una) {
+    const nombres = g.nombres || g.etiquetas;
+    return barrasH({ titulo: g.titulo, nota: g.nota,
+      items: g.etiquetas.map((_, i) => ({ nombre: nombres[i], valor: g.series[0].valores[i] || 0, color: g.series[0].colores[i] })) });
+  }
+  return barrasAgrupadas({
+    titulo: g.titulo, etiquetas: g.etiquetas, nota: g.nota,
+    series: g.series.map((x, i) => ({ ...x, color: COLORES[i % COLORES.length] })),
+    linea: g.linea ? { ...g.linea, color: COLORES[(g.series.length) % COLORES.length] } : null
+  });
+}
+
 // FIN DEL ARCHIVO graficas.js

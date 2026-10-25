@@ -3,7 +3,7 @@
 //   { titulo, subtitulo, columnas: [{ t, num, w }], grupos: [{ t, n, r }],
 //     filas: [{ c: [valores], e: 'normal' | 'n1' | 'n2' | 'grupo' | 'total' }],
 //     notas: [texto], horizontal: true|false, hoja: 'Nombre de la hoja',
-//     graficas: [{ tipo:'barras', titulo, etiquetas, series:[{nombre,valores,color:'#rrggbb'}], linea, nota } | { tipo:'dona', titulo, items:[{nombre,valor}], centro }] (solo PDF) }
+//     graficas: [{ tipo:'barras', titulo, etiquetas, series:[{nombre,valores,color:'#rrggbb'}], linea, nota } | { tipo:'dona', titulo, items:[{nombre,valor}], centro }] (PDF y Excel; series.colores = color de cada barra) }
 // Los valores numéricos van como número; null deja la celda vacía.
 
 const enc = new TextEncoder();
@@ -160,7 +160,7 @@ function nombreHoja(nombre, usados) {
   return n;
 }
 
-function hojaXml(spec, meta) {
+function hojaXml(spec, meta, nombreHojaXl) {
   const emp = encabezadoEmpresa(meta);
   const cols = spec.columnas;
   const nc = cols.length;
@@ -225,25 +225,126 @@ function hojaXml(spec, meta) {
     spec.notas.forEach((t) => filaSimple(t, XF.nota));
   }
 
+  // Gráficas: primero sus datos en celdas y debajo la gráfica de Excel (se edita y se actualiza sola)
+  const graficas = []; let colMax = nc;
+  if (spec.graficas && spec.graficas.length) {
+    r++;
+    filaSimple('Gráficas y sus datos', XF.negrita);
+    for (const g of spec.graficas) {
+      r++;
+      filaSimple(g.titulo, XF.negrita);
+      let cab; let datos; let ref;
+      if (g.tipo === 'dona') {
+        const items = (g.items || []).filter((x) => x.valor > 0.004);
+        cab = ['Concepto', 'Monto'];
+        datos = items.map((x) => [x.nombre, x.valor]);
+        ref = { tipo: 'dona', items, nser: 1 };
+      } else {
+        const sers = (g.series || []).concat(g.linea ? [g.linea] : []);
+        cab = ['Concepto'].concat(sers.map((x) => x.nombre));
+        datos = (g.etiquetas || []).map((e, i) => [e].concat(sers.map((x) => x.valores[i] ?? 0)));
+        ref = { tipo: 'barras', sers, nser: sers.length, linea: !!g.linea };
+      }
+      let cel = '';
+      cab.forEach((t, i) => { cel += celda(i, t, i ? XF.cabDer : XF.cabIzq); });
+      filas.push(`<row r="${r}" ht="20" customHeight="1">${cel}</row>`);
+      ref.filaCab = r; r++;
+      ref.filaIni = r;
+      datos.forEach((d) => {
+        let c2 = '';
+        d.forEach((v, i) => { c2 += celda(i, v, i ? XF.num : XF.txtAjuste); });
+        filas.push(`<row r="${r}">${c2}</row>`); r++;
+      });
+      ref.filaFin = r - 1;
+      colMax = Math.max(colMax, cab.length);
+      if (datos.length) { ref.g = g; ref.ancla = r; graficas.push(ref); r += 18; }
+      else { filaSimple('Sin datos para graficar.', XF.nota); }
+    }
+  }
+
   const anchos = cols.map((col, i) => {
     if (col.num) return 15;
     const maxTxt = Math.max(String(col.t || '').length,
       ...spec.filas.slice(0, 200).filter((f) => f.e !== 'texto').map((f) => String(f.c[i] ?? '').length));
     return Math.max(12, Math.min(i === 0 ? 52 : 44, maxTxt + 2));
   });
+  for (let i = nc; i < colMax; i++) anchos.push(15);
   const colsXml = anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
   const union = uniones.length ? `<mergeCells count="${uniones.length}">${uniones.map((u) => `<mergeCell ref="${u}"/>`).join('')}</mergeCells>` : '';
-  const ultima = `${letraColumna(nc - 1)}${r - 1}`;
+  const ultima = `${letraColumna(colMax - 1)}${r - 1}`;
+  const dibujo = graficas.length ? '<drawing r:id="rId1"/>' : '';
+  const xmlHoja = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${ultima}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${filaCongelar}" topLeftCell="A${filaCongelar + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="14"/><cols>${colsXml}</cols><sheetData>${filas.join('')}</sheetData>${union}<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${spec.horizontal ? 'landscape' : 'portrait'}" fitToWidth="1" fitToHeight="0"/>${dibujo}</worksheet>`;
+  return { xml: xmlHoja, graficas, nombre: nombreHojaXl };
+}
+
+/* ----- Gráficas nativas de Excel (DrawingML) ----- */
+const PALETA_XL = ['2A78D6', 'EB6834', '1BAF7A', 'EDA100', 'E87BA4', '6250D6', '0B6B57', 'A855F7', '14B8A6', 'F43F5E', '64748B'];
+const hex6 = (c, i) => String(c || PALETA_XL[i % PALETA_XL.length]).replace('#', '').toUpperCase();
+const relleno = (c) => `<a:solidFill><a:srgbClr val="${c}"/></a:solidFill>`;
+
+function chartXml(ref, hoja) {
+  const g = ref.g;
+  const q = `'${String(hoja).replace(/'/g, "''")}'`;
+  const colL = (i) => letraColumna(i);
+  const rangoCat = `${q}!$A$${ref.filaIni}:$A$${ref.filaFin}`;
+  const textos = ref.tipo === 'dona' ? ref.items.map((x) => x.nombre) : (g.etiquetas || []);
+  const cacheCat = `<c:strCache><c:ptCount val="${textos.length}"/>${textos.map((t, i) => `<c:pt idx="${i}"><c:v>${xml(t)}</c:v></c:pt>`).join('')}</c:strCache>`;
+  const serXml = (nombre, valores, col, idx, kind, color, colores) => {
+    const rc = `${colL(col)}`;
+    const tx = `<c:tx><c:strRef><c:f>${q}!$${rc}$${ref.filaCab}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${xml(nombre)}</c:v></c:pt></c:strCache></c:strRef></c:tx>`;
+    const cat = `<c:cat><c:strRef><c:f>${rangoCat}</c:f>${cacheCat}</c:strRef></c:cat>`;
+    const val = `<c:val><c:numRef><c:f>${q}!$${rc}$${ref.filaIni}:$${rc}$${ref.filaFin}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${valores.length}"/>${valores.map((v, i) => `<c:pt idx="${i}"><c:v>${Number(v) || 0}</c:v></c:pt>`).join('')}</c:numCache></c:numRef></c:val>`;
+    const dl = (pct) => `<c:dLbls><c:numFmt formatCode="${pct ? '0.0%' : '#,##0'}" sourceLinked="0"/><c:spPr><a:noFill/></c:spPr><c:showLegendKey val="0"/><c:showVal val="${pct ? 0 : 1}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="${pct ? 1 : 0}"/><c:showBubbleSize val="0"/></c:dLbls>`;
+    if (kind === 'dona') {
+      const dpt = valores.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr>${relleno(hex6(ref.items[i].color, i))}<a:ln w="12700"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join('');
+      return `<c:ser><c:idx val="${idx}"/><c:order val="${idx}"/>${tx}${dpt}${dl(true)}${cat}${val}</c:ser>`;
+    }
+    if (kind === 'linea') {
+      return `<c:ser><c:idx val="${idx}"/><c:order val="${idx}"/>${tx}<c:spPr><a:ln w="28575" cap="rnd"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:round/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr>${relleno(color)}</c:spPr></c:marker>${cat}${val}<c:smooth val="0"/></c:ser>`;
+    }
+    const dpt = colores ? valores.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr>${relleno(hex6(colores[i], i))}</c:spPr></c:dPt>`).join('') : '';
+    return `<c:ser><c:idx val="${idx}"/><c:order val="${idx}"/>${tx}<c:spPr>${relleno(color)}</c:spPr><c:invertIfNegative val="0"/>${dpt}${colores ? dl(false) : ''}${cat}${val}</c:ser>`;
+  };
+  let plot; let leyenda = true;
+  if (ref.tipo === 'dona') {
+    const valores = ref.items.map((x) => x.valor);
+    plot = `<c:doughnutChart><c:varyColors val="1"/>${serXml('Monto', valores, 1, 0, 'dona')}<c:firstSliceAng val="0"/><c:holeSize val="55"/></c:doughnutChart>`;
+  } else {
+    const barras = (g.series || []).map((sr, i) => serXml(sr.nombre, sr.valores, i + 1, i, 'barra', hex6(sr.color, i), sr.colores));
+    const nb = barras.length;
+    plot = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${barras.join('')}<c:gapWidth val="70"/><c:axId val="5001"/><c:axId val="5002"/></c:barChart>`;
+    if (g.linea) plot += `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${serXml(g.linea.nombre, g.linea.valores, nb + 1, nb, 'linea', hex6(g.linea.color, nb))}<c:marker val="1"/><c:axId val="5001"/><c:axId val="5002"/></c:lineChart>`;
+    plot += `<c:catAx><c:axId val="5001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="low"/><c:crossAx val="5002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>`
+      + `<c:valAx><c:axId val="5002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="D9DEDC"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="5001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>`;
+    if (nb === 1 && !g.linea && (g.series[0].colores)) leyenda = false;
+  }
+  const titulo = `<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1200" b="1"/></a:pPr><a:r><a:rPr lang="es-PA" sz="1200" b="1"/><a:t>${xml(g.titulo)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${ultima}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${filaCongelar}" topLeftCell="A${filaCongelar + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="14"/><cols>${colsXml}</cols><sheetData>${filas.join('')}</sheetData>${union}<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${spec.horizontal ? 'landscape' : 'portrait'}" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:roundedCorners val="0"/><c:chart>${titulo}<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>${plot}</c:plotArea>${leyenda ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' : ''}<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`;
+}
+
+function dibujoXml(refs) {
+  const anc = refs.map((ref, i) => {
+    const f0 = ref.ancla - 1; const f1 = f0 + 16;
+    return `<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${f0}</xdr:row><xdr:rowOff>60000</xdr:rowOff></xdr:from><xdr:to><xdr:col>6</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${f1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${i + 2}" name="Gráfica ${i + 1}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${i + 1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`;
+  }).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${anc}</xdr:wsDr>`;
 }
 
 export function construirXlsx(specs, meta) {
   const usados = [];
   const nombres = specs.map((s) => nombreHoja(s.hoja || s.titulo, usados));
+  const hojas = specs.map((s, i) => hojaXml(s, meta, nombres[i]));
   const archivos = [];
+  const dibujos = []; // { hoja: i, n: número de dibujo, refs }
+  let nGraf = 0;
+  hojas.forEach((hj, i) => { if (hj.graficas.length) dibujos.push({ hoja: i, n: dibujos.length + 1, refs: hj.graficas, g0: nGraf + 1 }), nGraf += hj.graficas.length; });
+  const tiposExtra = dibujos.map((d) => `<Override PartName="/xl/drawings/drawing${d.n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join('')
+    + Array.from({ length: nGraf }, (_, k) => `<Override PartName="/xl/charts/chart${k + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('');
   archivos.push(['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${specs.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`]);
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${specs.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}${tiposExtra}</Types>`]);
   archivos.push(['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`]);
   archivos.push(['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -251,7 +352,15 @@ export function construirXlsx(specs, meta) {
   archivos.push(['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${specs.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${specs.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`]);
   archivos.push(['xl/styles.xml', ESTILOS_XML]);
-  specs.forEach((s, i) => archivos.push([`xl/worksheets/sheet${i + 1}.xml`, hojaXml(s, meta)]));
+  hojas.forEach((hj, i) => archivos.push([`xl/worksheets/sheet${i + 1}.xml`, hj.xml]));
+  dibujos.forEach((d) => {
+    archivos.push([`xl/worksheets/_rels/sheet${d.hoja + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${d.n}.xml"/></Relationships>`]);
+    archivos.push([`xl/drawings/drawing${d.n}.xml`, dibujoXml(d.refs)]);
+    archivos.push([`xl/drawings/_rels/drawing${d.n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${d.refs.map((_, k) => `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${d.g0 + k}.xml"/>`).join('')}</Relationships>`]);
+    d.refs.forEach((ref, k) => archivos.push([`xl/charts/chart${d.g0 + k}.xml`, chartXml(ref, nombres[d.hoja])]));
+  });
   return zip(archivos);
 }
 
@@ -537,7 +646,7 @@ export function construirPdf(specs, meta) {
         if (!todas.some((v) => Math.abs(v) > 0.004)) { texto('Sin datos para graficar.', M, y + 9, 8.5, false, '0.35 0.4 0.38'); y += 18; return; }
         const items = series.map((s2) => ({ nombre: s2.nombre, color: s2.color }));
         if (g.linea) items.push({ nombre: g.linea.nombre, color: g.linea.color });
-        y += leyenda(items, M, y, util) + 4;
+        if (!(series.length === 1 && !g.linea && series[0].colores)) y += leyenda(items, M, y, util) + 4;
         const { lo, hi, marcas } = escala(Math.min(0, ...todas), Math.max(0, ...todas));
         const ejeX = M + 52; const ancho = util - 56; const top = y + 4; const area = 110;
         const py = (v) => top + area - ((v - lo) / (hi - lo)) * area;
@@ -551,7 +660,7 @@ export function construirPdf(specs, meta) {
           const x = ejeX + i * grupoW + (grupoW - barW * series.length) / 2 + si * barW;
           const y0 = py(0); const y1 = py(v);
           if (Math.abs(v) < 0.004) return;
-          rect(x, Math.min(y0, y1), barW - 1, Math.abs(y1 - y0), rgb(s2.color));
+          rect(x, Math.min(y0, y1), barW - 1, Math.abs(y1 - y0), rgb((s2.colores && s2.colores[i]) || s2.color));
         }));
         if (g.linea) {
           const c = rgb(g.linea.color); const pp = g.linea.valores.map((v, i) => [ejeX + i * grupoW + grupoW / 2, py(v)]);
@@ -564,6 +673,24 @@ export function construirPdf(specs, meta) {
         });
         y = top + area + 20;
         if (g.nota) { texto(g.nota, M, y + 7, 7.5, false, '0.35 0.4 0.38'); y += 11; }
+        // Datos de la gráfica en tabla (misma información que se ve en las barras)
+        {
+          const sers = series.concat(g.linea ? [g.linea] : []);
+          const etq = g.etiquetas || [];
+          const w1 = Math.min(150, util * 0.32); const wc = (util - w1) / Math.max(1, sers.length);
+          const fila = (celdas, negrita, fondo) => {
+            if (y + 10 > H - pie) nueva();
+            if (fondo) rect(M, y, util, 10, fondo);
+            celdas.forEach((t, k) => {
+              const tt = recorta(t, (k ? wc : w1) - 4, 7.5, negrita);
+              if (k === 0) texto(tt, M + 2, y + 7.5, 7.5, negrita);
+              else texto(tt, M + w1 + wc * k - 3 - anchoTexto(tt, 7.5, negrita), y + 7.5, 7.5, negrita);
+            });
+            y += 10;
+          };
+          fila([''].concat(sers.map((x) => x.nombre)), true, '0.93 0.95 0.94');
+          etq.forEach((e, i) => fila([e].concat(sers.map((x) => fmt(x.valores[i] || 0))), false, null));
+        }
         y += 8;
       });
     }

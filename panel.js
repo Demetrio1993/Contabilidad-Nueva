@@ -6,7 +6,7 @@ import {
 import { barraExportar } from './informes.js';
 import { cargarEstados, calcularRazones, textoValor } from './analisis.js';
 import { n2 } from './exportar.js';
-import { barrasAgrupadas, dona } from './graficas.js';
+import { barrasAgrupadas, dona, graficaDeSpec } from './graficas.js';
 import { seccionVencimientos } from './vencimientos.js';
 import { avisoRespaldo } from './respaldo.js';
 
@@ -17,6 +17,8 @@ const valor = (rows, orden) => {
   const f = rows.find((x) => x.orden === orden);
   return [NUM(f && f.actual), NUM(f && f.anterior)];
 };
+// Ingresos = ingresos de operaciones + otros ingresos
+const ingresosTotal = (rows) => { const a = valor(rows, 1950); const o = valor(rows, 6950); return [a[0] + o[0], a[1] + o[1]]; };
 const variacion = (a, b) => (Math.abs(b) < 0.005 ? null : ((a - b) / Math.abs(b)) * 100);
 const pctTxt = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
 
@@ -67,9 +69,37 @@ async function cargarGastosRubro(id, anio) {
   return lista;
 }
 
+
+const anioContra = (d, i) => [ingresosTotal(d.resultados)[i], valor(d.resultados, 2950)[i], valor(d.resultados, 4950)[i], valor(d.resultados, 11000)[i]];
+
+// Cifras clave en el orden pedido. Seguro educativo e impuesto salen del estado de resultados.
+const COLORES_CIFRAS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#6250d6', '#0b6b57', '#a855f7', '#14b8a6', '#f43f5e', '#64748b'];
+function porConcepto(rows, texto) {
+  const f = rows.find((x) => x.fila === 'detalle' && String(x.concepto || '').toLowerCase().startsWith(texto));
+  return [NUM(f && f.actual), NUM(f && f.anterior)];
+}
+function cifrasClave(d, cxc, cxp) {
+  const gas = [4950, 7950, 8950].map((o) => valor(d.resultados, o));
+  const gastos = [gas.reduce((a, x) => a + x[0], 0), gas.reduce((a, x) => a + x[1], 0)];
+  const lista = [
+    ['Activos', 'Activos', ...valor(d.balance, 3000)],
+    ['Pasivo', 'Pasivo', ...valor(d.balance, 6000)],
+    ['Capital', 'Capital', ...valor(d.balance, 7950)],
+    ['Ingresos', 'Ingresos', ...ingresosTotal(d.resultados)],
+    ['Costos', 'Costos', ...valor(d.resultados, 2950)],
+    ['Gastos', 'Gastos', ...gastos],
+    ['Seguro educativo (DGI)', 'Seg. educ.', ...porConcepto(d.resultados, 'seguro educativo')],
+    ['Impuesto sobre la renta (DGI)', 'Imp. renta', ...porConcepto(d.resultados, 'impuesto sobre la renta')],
+    ['Utilidad neta', 'Utilidad neta', ...valor(d.resultados, 11000)],
+    ['Por cobrar', 'Por cobrar', cxc.total, null],
+    ['Por pagar', 'Por pagar', cxp.total, null]
+  ];
+  return lista.map(([nombre, corto, a, b], i) => ({ nombre, corto, a, b, color: COLORES_CIFRAS[i] }));
+}
+
 // Frases del resumen. Solo se escribe lo que los números permiten afirmar.
 function redactar(anio, d, razones, cxc, cxp) {
-  const [ing, ingA] = valor(d.resultados, 1950);
+  const [ing, ingA] = ingresosTotal(d.resultados);
   const [un, unA] = valor(d.resultados, 11000);
   const [ta] = valor(d.balance, 3000);
   const [tp] = valor(d.balance, 6000);
@@ -84,10 +114,6 @@ function redactar(anio, d, razones, cxc, cxp) {
     ? `La utilidad neta fue ${dinero(un)}` + (ing ? `, un margen de ${pctTxt((un / ing) * 100)} sobre los ingresos` : '') + (unA ? ` (año anterior: ${dinero(unA)}).` : '.')
     : `El año cerró con una pérdida neta de ${dinero(Math.abs(un))}` + (unA ? ` (año anterior: ${dinero(unA)}).` : '.'));
   frases.push(`Al cierre el activo total es ${dinero(ta)}, con pasivos de ${dinero(tp)} y patrimonio de ${dinero(pat)}.`);
-  const rc = razones.find((x) => x.nombre === 'Razón corriente');
-  if (rc && rc.a !== null) {
-    frases.push(`La razón corriente es ${textoValor(rc.a, 'x')}` + (rc.a < 1 ? ': los pasivos corrientes superan a los activos corrientes.' : '.'));
-  }
   if (cxc.total > 0) {
     frases.push(`Los clientes deben ${dinero(cxc.total)}` + (cxc.vencida > 0 ? `, de los cuales ${dinero(cxc.vencida)} llevan más de 90 días.` : ', y nada pasa de 90 días.'));
   }
@@ -100,22 +126,17 @@ function redactar(anio, d, razones, cxc, cxp) {
   return frases;
 }
 
-function specResumen(empresa, anio, d, razones, frases, graficas) {
-  const ind = [
-    ['Ingresos', ...valor(d.resultados, 1950)], ['Utilidad bruta', ...valor(d.resultados, 3000)],
-    ['Utilidad operativa', ...valor(d.resultados, 5000)], ['Utilidad neta', ...valor(d.resultados, 11000)],
-    ['Activo total', ...valor(d.balance, 3000)], ['Pasivo total', ...valor(d.balance, 6000)], ['Patrimonio', ...valor(d.balance, 7950)]
-  ];
-  const filas = ind.map(([n, a, b]) => ({ c: [n, a, b, a - b], e: 'normal' }));
+function specResumen(empresa, anio, d, razones, frases, graficas, cifras) {
+  const filas = cifras.map((x) => ({ c: [x.nombre, x.a, x.b, x.b === null ? null : x.a - x.b], e: 'normal' }));
   filas.push({ c: ['Razones', null, null, null], e: 'grupo' });
-  for (const r of razones.filter((x) => !x.grupo && ['Razón corriente', 'Margen neto', 'Pasivo total sobre activo total', 'Rendimiento sobre patrimonio'].includes(x.nombre))) {
+  for (const r of razones.filter((x) => !x.grupo && ['Margen neto', 'Pasivo total sobre activo total', 'Rendimiento sobre patrimonio'].includes(x.nombre))) {
     filas.push({ c: [r.nombre, textoValor(r.a, r.tipo), textoValor(r.b, r.tipo), null], e: 'normal' });
   }
   return {
     titulo: 'Resumen ejecutivo', subtitulo: `Año ${anio}`, hoja: 'Resumen ejecutivo',
     columnas: [{ t: 'Indicador', w: 1 }, { t: String(anio), num: true }, { t: String(anio - 1), num: true }, { t: 'Variación', num: true }],
     filas,
-    notas: frases,
+    notas: frases.concat(['Por cobrar y por pagar son los saldos a la fecha de corte; no se comparan con el año anterior.']),
     graficas: graficas || []
   };
 }
@@ -148,7 +169,11 @@ export async function vistaPanel(id) {
       const razones = calcularRazones(d.balance, d.resultados);
       const frases = redactar(est.anio, d, razones, cxc, cxp);
       const [tp0] = valor(d.balance, 6000);
+      const cifras = cifrasClave(d, cxc, cxp);
       const graficasPdf = [
+        { tipo: 'barras', titulo: `Cifras clave, ${est.anio}`, etiquetas: cifras.map((x) => x.corto), nombres: cifras.map((x) => x.nombre),
+          series: [{ nombre: String(est.anio), valores: cifras.map((x) => x.a), color: '#2a78d6', colores: cifras.map((x) => x.color) }],
+          nota: 'Montos en balboas. Por cobrar y por pagar al corte.' },
         { tipo: 'barras', titulo: `Ingresos, gastos y utilidad por mes, ${est.anio}`, etiquetas: MESES,
           series: [{ nombre: 'Ingresos', valores: mensual.map((m) => m.ingresos), color: '#2a78d6' },
             { nombre: 'Gastos y costos', valores: mensual.map((m) => m.gastos), color: '#eb6834' }],
@@ -161,23 +186,18 @@ export async function vistaPanel(id) {
           series: [{ nombre: 'Por cobrar', valores: cxc.tramos, color: '#2a78d6' }, { nombre: 'Por pagar', valores: cxp.tramos, color: '#eb6834' }],
           nota: `Al ${corte.split('-').reverse().join('/')}.` },
         { tipo: 'barras', titulo: 'Año contra año', etiquetas: ['Ingresos', 'Costos', 'Gastos op.', 'Utilidad neta'],
-          series: [{ nombre: String(est.anio), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[0]), color: '#2a78d6' },
-            { nombre: String(est.anio - 1), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[1]), color: '#eda100' }] }
+          series: [{ nombre: String(est.anio), valores: anioContra(d, 0), color: '#2a78d6' },
+            { nombre: String(est.anio - 1), valores: anioContra(d, 1), color: '#eda100' }] }
       ];
-      est.exp = { specs: [specResumen(empresa, est.anio, d, razones, frases, graficasPdf)], archivo: `${empresa.razon_social}-resumen-ejecutivo-${est.anio}` };
+      est.exp = { specs: [specResumen(empresa, est.anio, d, razones, frases, graficasPdf, cifras)], archivo: `${empresa.razon_social}-resumen-ejecutivo-${est.anio}` };
 
-      const [ing] = valor(d.resultados, 1950); const [un] = valor(d.resultados, 11000);
       const [ta] = valor(d.balance, 3000); const [tp] = valor(d.balance, 6000);
-      const chip = (t, v) => h('div', { class: 'chip' }, h('span', { class: 'ayuda' }, t), h('strong', null, v));
-      const rc = razones.find((x) => x.nombre === 'Razón corriente');
+      const chip = (x) => h('div', { class: 'chip', style: `border-left:4px solid ${x.color}` }, h('span', { class: 'ayuda' }, x.nombre), h('strong', null, dinero(x.a)));
 
       zona.replaceChildren(
         barraExportar({ empresa, obtener: () => est.exp, etiquetaExcel: 'Resumen en Excel', etiquetaPdf: 'Resumen en PDF' }),
-        h('div', { class: 'resumen' },
-          chip('Ingresos', dinero(ing)), chip('Utilidad neta', dinero(un)),
-          chip('Activos', dinero(ta)), chip('Pasivos', dinero(tp)),
-          chip('Razón corriente', rc ? textoValor(rc.a, 'x') : '—'),
-          chip('Por cobrar', dinero(cxc.total)), chip('Por pagar', dinero(cxp.total))),
+        h('div', { class: 'resumen' }, ...cifras.map(chip)),
+        graficaDeSpec(graficasPdf[0]),
         h('div', { class: 'tarjeta' }, h('h3', null, 'Resumen ejecutivo'),
           ...frases.map((x) => h('p', null, x))),
         barrasAgrupadas({
@@ -204,8 +224,8 @@ export async function vistaPanel(id) {
         barrasAgrupadas({
           titulo: 'Año contra año',
           etiquetas: ['Ingresos', 'Costos', 'Gastos op.', 'Utilidad neta'],
-          series: [{ nombre: String(est.anio), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[0]), color: 'var(--g1)' },
-            { nombre: String(est.anio - 1), valores: [1950, 2950, 4950, 11000].map((o) => valor(d.resultados, o)[1]), color: 'var(--g4)' }]
+          series: [{ nombre: String(est.anio), valores: anioContra(d, 0), color: 'var(--g1)' },
+            { nombre: String(est.anio - 1), valores: anioContra(d, 1), color: 'var(--g4)' }]
         }));
     } catch (e) {
       est.exp = null;
