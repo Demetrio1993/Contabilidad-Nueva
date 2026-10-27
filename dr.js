@@ -77,7 +77,7 @@ export async function vistaRenta(id) {
   const empresa = await cargarEmpresa(id);
   const puedeAsignar = empresa.rol === 'admin' || empresa.rol === 'contador';
   const esLector = empresa.rol === 'lector';
-  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set(), aprob: [], aprobFalta: false, confirma: false, nota: '', menor35: false, opcFalta: false };
+  const est = { anio: Number(hoy().slice(0, 4)), filas: [], base: [], obs: [], sinMov: false, marcadas: new Set(), aprob: [], aprobFalta: false, confirma: false, nota: '', menor35: false, restarAgro: false, opcFalta: false };
   const cuerpo = h('div');
   const anio = h('input', {
     type: 'number', min: '2000', max: '2100', inputmode: 'numeric', value: String(est.anio),
@@ -92,10 +92,14 @@ export async function vistaRenta(id) {
         db.rpc('dr_base', { p_empresa: id, p_anio: est.anio }),
         db.rpc('dr_sin_renglon', { p_empresa: id, p_anio: est.anio }),
         db.from('dr_plantilla').select('renglon, lado, tipos').eq('formulario', 'natural').not('renglon', 'is', null),
-        db.from('dr_opciones').select('menor_35').eq('empresa_id', id).eq('anio', est.anio).maybeSingle()
+        db.from('dr_opciones').select('menor_35, restar_agro_118').eq('empresa_id', id).eq('anio', est.anio).maybeSingle()
       ]);
       est.opcFalta = !!op.error;
       est.menor35 = !!(op.data && op.data.menor_35);
+      // línea 118 menos línea 6: lo elegido; si no se ha elegido, solo la empresa de Luis Addiel Atencio Rodríguez
+      const nomEmp = String((empresa && empresa.razon_social) || '');
+      est.restarAgro = (op.data && op.data.restar_agro_118 !== null && op.data.restar_agro_118 !== undefined)
+        ? !!op.data.restar_agro_118 : (/luis/i.test(nomEmp) && /atencio/i.test(nomEmp));
       for (const r of [d, b, o, pl]) if (r.error) throw r.error;
       const lados = new Map((pl.data || []).map((x) => [x.renglon, x]));
       est.filas = (d.data || []).map((x) => ({ ...x, lado: lados.has(x.renglon) ? lados.get(x.renglon).lado : null }));
@@ -347,6 +351,23 @@ export async function vistaRenta(id) {
     await cargar();
   }
 
+  async function cambiarAgro(marcado) {
+    const { error } = await db.rpc('dr_guardar_opcion', { p_empresa: id, p_anio: est.anio, p_restar_agro: marcado });
+    if (error) { toast(traducirError(error), 'error'); await cargar(); return; }
+    toast('Guardado. Se recalculó la línea 118.', 'ok');
+    await cargar();
+  }
+
+  function bloqueAgro() {
+    if (est.opcFalta) return null;
+    const check = h('input', { type: 'checkbox', checked: est.restarAgro, disabled: !puedeAsignar,
+      onchange: (e) => cambiarAgro(e.target.checked) });
+    return h('div', { class: 'tarjeta' },
+      h('h3', null, `Seguro educativo ${est.anio} (línea 118)`),
+      h('label', { class: 'fila-check' }, check, h('span', null, 'Restar los ingresos agropecuarios (línea 6) en la línea 118')),
+      h('p', { class: 'ayuda' }, 'Los ingresos agropecuarios están exentos del seguro educativo. Con la casilla marcada, la línea 118 es la 17, menos 1, 3, 4, 5, menos 18, 19, 35, 62 y también menos la línea 6. Ya viene marcada en la declaración de Luis Addiel Atencio Rodríguez.'));
+  }
+
   function bloqueCss() {
     if (est.opcFalta) {
       return puedeAsignar ? h('div', { class: 'tarjeta error' }, h('p', null, 'Falta ejecutar el script 95 en Supabase (cuota de la CSS).')) : null;
@@ -403,6 +424,7 @@ export async function vistaRenta(id) {
         h('div', { class: 'dr-version' }, TITULO_VERSION)),
       h('p', { class: 'ayuda' }, 'Ingresos, costos y gastos: movimiento del año. Activo y pasivo: saldo al 31 de diciembre. Toca un renglón con cuentas para verlas, o un renglón de fórmula para ver cómo se calcula. El lápiz ✎ permite escribir el monto a mano (reemplaza al calculado, se puede quitar y las líneas siguientes lo usan). Los renglones "Menos:" van en positivo. Los renglones sin fórmula (103, 105 a 107, 109, 119, 120 y los incentivos) se escriben a mano; el 103 se resta en la 110 y la 111.'),
       tabla,
+      bloqueAgro(),
       bloqueCss(),
       bloqueObservacion(),
       bloqueAprobacion(),

@@ -153,7 +153,9 @@ export async function vistaCierre(id) {
     const tabla = h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
       h('thead', null, h('tr', null, h('th', null, 'Concepto'), h('th', { class: 'num' }, 'Monto'))),
       h('tbody', null,
-        fila('Renta gravable (utilidad antes de impuestos)', x.utilidad_antes),
+        fila('Utilidad antes de impuestos', x.utilidad_antes),
+        NUM(x.ingresos_exentos) !== 0 ? fila('Menos: ingresos exentos (agropecuarios y otros)', NUM(x.ingresos_exentos)) : null,
+        fila('Renta gravable (base del seguro educativo y del impuesto)', x.renta_gravable !== undefined && x.renta_gravable !== null ? x.renta_gravable : x.utilidad_antes),
         fila(`Seguro educativo (${(NUM(x.tasa) * 100).toFixed(2)} % de la renta gravable${NUM(x.tope) > 0 ? ', base máxima ' + dinero(x.tope) : ''})`, NUM(x.se_manual) + NUM(x.se_auto)),
         fila(x.isr_es_manual ? 'Impuesto sobre la renta (monto escrito a mano)' : 'Impuesto sobre la renta (tabla de persona natural)', NUM(x.isr_manual) + NUM(x.isr_auto)),
         fila('Utilidad neta', x.utilidad_neta, true))));
