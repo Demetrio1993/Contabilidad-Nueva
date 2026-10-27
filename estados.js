@@ -312,17 +312,65 @@ export async function vistaEstados(id) {
     };
   }
 
+  /* inventario inicial y final (para el costo de venta del estado de resultados) */
+  async function tarjetaInventario() {
+    const { data, error } = await db.from('inventario_estado').select('anio, inicial, final')
+      .eq('empresa_id', id).in('anio', [est.anio, est.anio - 1]);
+    if (error) {
+      return h('div', { class: 'tarjeta error' }, h('p', null, 'Falta ejecutar el script 102 en Supabase (inventario inicial y final).'));
+    }
+    const por = new Map((data || []).map((x) => [x.anio, x]));
+    const puede = empresa.rol !== 'lector';
+    const caja = (v) => h('input', {
+      type: 'number', min: '0', step: '0.01', inputmode: 'decimal', disabled: !puede,
+      value: v === null || v === undefined ? '' : String(v), placeholder: '0.00'
+    });
+    const fila = (anio) => {
+      const x = por.get(anio) || {};
+      return { anio, ini: caja(x.inicial), fin: caja(x.final), tenia: !!por.get(anio),
+        orig: [x.inicial === undefined ? null : x.inicial, x.final === undefined ? null : x.final] };
+    };
+    const filas = [fila(est.anio), fila(est.anio - 1)];
+    const num = (inp) => (inp.value === '' ? null : redondear(Number(inp.value)));
+    const guardar = h('button', { class: 'btn', type: 'button' }, 'Guardar inventarios');
+    guardar.addEventListener('click', async () => {
+      guardar.disabled = true;
+      try {
+        for (const f of filas) {
+          const i = num(f.ini); const fi = num(f.fin);
+          if ((i !== null && i < 0) || (fi !== null && fi < 0)) throw new Error('El inventario no puede ser negativo.');
+          if (i === f.orig[0] && fi === f.orig[1]) continue;
+          const r = await db.rpc('inventario_estado_guardar', { p_empresa: id, p_anio: f.anio, p_inicial: i, p_final: fi });
+          if (r.error) throw r.error;
+        }
+        toast('Inventarios guardados. El estado de resultados se actualizó.', 'ok');
+        await pintar();
+      } catch (e) { toast(traducirError(e), 'error'); }
+      guardar.disabled = false;
+    });
+    return h('div', { class: 'tarjeta' },
+      h('h3', null, 'Inventario inicial y final'),
+      h('p', { class: 'ayuda' }, 'Costo de venta = inventario inicial + compras de mercancía − inventario final. Escribe aquí los dos inventarios y el estado de resultados se actualiza solo. Las compras salen de las cuentas 5.1.01.001 (compras), 5.1.01.002 (devoluciones y descuentos) y 5.1.01.003 (fletes). Si dejas el inicial vacío, se usa el inventario final del año anterior.'),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
+        h('thead', null, h('tr', null, h('th', null, 'Año'), h('th', { class: 'num' }, 'Inventario inicial'), h('th', { class: 'num' }, 'Inventario final'))),
+        h('tbody', null, filas.map((f) => h('tr', null, h('td', null, String(f.anio)), h('td', null, f.ini), h('td', null, f.fin)))))),
+      puede ? guardar : h('p', { class: 'ayuda' }, 'Solo el administrador o el contador pueden escribir los inventarios.'),
+      h('p', { class: 'ayuda' }, 'Son cifras del estado de resultados: no crean asientos. El seguro educativo y el impuesto se calculan sobre la utilidad de este estado. El balance y el libro mayor siguen con lo registrado; no registres además un ajuste al costo de ventas por la misma variación, porque se contaría dos veces.'));
+  }
+
   async function construirEstado() {
     const rows = await cargarEstado(est.tipo);
     const tipo = est.tipo;
     const hay = rows.some((r) => r.fila === 'detalle');
     const fiscal = tipo === 'balance' ? await cargarCierreFiscal(id, est.anio) : null;
+    const inventario = tipo === 'resultados' ? await tarjetaInventario() : null;
     const nodo = h('div', null,
       empresa.rol === 'lector' ? null : h('div', { class: 'acciones' },
         h('button', { class: 'btn btn-sec', type: 'button', onclick: () => abrirAnteriores(tipo, rows).catch((er) => toast(traducirError(er), 'error')) }, `Cifras del año ${est.anio - 1}`)),
       avisoControl(rows),
       hay ? tablaEstado(tipo, rows) : h('p', { class: 'ayuda' }, 'No hay cifras para este año. Registra transacciones y, si ya terminó el año, haz el cierre anual.'),
-      hay ? tarjetaCierreFiscal(fiscal, est.anio) : null);
+      hay ? tarjetaCierreFiscal(fiscal, est.anio) : null,
+      tipo === 'resultados' ? inventario : null);
     return { nodo, spec: hay ? specEstado(tipo, rows, est.anio) : null, fiscal };
   }
 
