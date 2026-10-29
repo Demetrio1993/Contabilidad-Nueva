@@ -165,8 +165,8 @@ function hojaXml(spec, meta, nombreHojaXl) {
   const cols = spec.columnas;
   const nc = cols.length;
   const filas = []; const uniones = [];
-  // Empresa de Sublikaf: arriba van los dos logos (Sublikaf y luego el de la marca), en 4 filas libres
-  const conLogos = !!(logoPdf && logoSub && esSublikaf(meta));
+  // Empresas con logo propio (Sublikaf, ACSE): arriba van los dos logos (el de la empresa y luego el de la marca), en 4 filas libres
+  const conLogos = !!(logoPdf && logoCli);
   let r = conLogos ? 5 : 1;
   const celda = (c, v, s) => {
     const ref = letraColumna(c) + r;
@@ -329,7 +329,7 @@ function chartXml(ref, hoja) {
 // Logos de la hoja (en EMU): primero Sublikaf y a su derecha el de la marca; 4 filas de 14 pt = 56 pt de alto
 function logosXml(desdeId) {
   const h = 50 * 12700; const y = 3 * 12700;
-  const w1 = Math.round(h * logoSub.w / logoSub.h); const w2 = Math.round(h * logoPdf.w / logoPdf.h);
+  const w1 = Math.round(h * logoCli.w / logoCli.h); const w2 = Math.round(h * logoPdf.w / logoPdf.h);
   const pic = (id, nombre, rid, x, w) => `<xdr:absoluteAnchor><xdr:pos x="${x}" y="${y}"/><xdr:ext cx="${w}" cy="${h}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${id}" name="${nombre}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:absoluteAnchor>`;
   return pic(100, 'Logo Sublikaf', `rId${desdeId}`, 0, w1) + pic(101, 'Logo', `rId${desdeId + 1}`, w1 + 12 * 12700, w2);
 }
@@ -344,6 +344,7 @@ function dibujoXml(refs, conLogos) {
 }
 
 export function construirXlsx(specs, meta) {
+  logoCli = logoDe(meta);
   const usados = [];
   const nombres = specs.map((s) => nombreHoja(s.hoja || s.titulo, usados));
   const hojas = specs.map((s, i) => hojaXml(s, meta, nombres[i]));
@@ -368,11 +369,11 @@ export function construirXlsx(specs, meta) {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${d.n}.xml"/></Relationships>`]);
     archivos.push([`xl/drawings/drawing${d.n}.xml`, dibujoXml(d.refs, d.logos)]);
     archivos.push([`xl/drawings/_rels/drawing${d.n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${d.refs.map((_, k) => `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${d.g0 + k}.xml"/>`).join('')}${d.logos ? `<Relationship Id="rId${d.refs.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-sublikaf.jpg"/><Relationship Id="rId${d.refs.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-marca.jpg"/>` : ''}</Relationships>`]);
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${d.refs.map((_, k) => `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${d.g0 + k}.xml"/>`).join('')}${d.logos ? `<Relationship Id="rId${d.refs.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-socio.jpg"/><Relationship Id="rId${d.refs.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-marca.jpg"/>` : ''}</Relationships>`]);
     d.refs.forEach((ref, k) => archivos.push([`xl/charts/chart${d.g0 + k}.xml`, chartXml(ref, nombres[d.hoja])]));
   });
   if (dibujos.some((d) => d.logos)) {
-    archivos.push(['xl/media/logo-sublikaf.jpg', logoSub.bytes]);
+    archivos.push(['xl/media/logo-socio.jpg', logoCli.bytes]);
     archivos.push(['xl/media/logo-marca.jpg', logoPdf.bytes]);
   }
   return zip(archivos);
@@ -452,12 +453,20 @@ function leerJpeg(url, asignar) {
     asignar({ w, h: hh, datos: s, bytes: u });
   }).catch(() => {});
 }
-let logoPdf = null; let logoSub = null;
+let logoPdf = null; let logoSub = null; let logoAcse = null; let logoCli = null;
 leerJpeg('logo-pdf.jpg', (x) => { logoPdf = x; });
 leerJpeg('logo-sublikaf.jpg', (x) => { logoSub = x; });
-const esSublikaf = (meta) => /sublikaf|freddy\s+abdel/i.test(String(((meta && meta.empresa) || {}).razon_social || ''));
+leerJpeg('logo-acse.jpg', (x) => { logoAcse = x; });
+// Logo adicional por empresa (va primero, antes del logo de la marca)
+const logoDe = (meta) => {
+  const n = String(((meta && meta.empresa) || {}).razon_social || '');
+  if (/sublikaf|freddy\s+abdel/i.test(n)) return logoSub;
+  if (/acse|indira\s+c[oó]rdoba/i.test(n)) return logoAcse;
+  return null;
+};
 
 export function construirPdf(specs, meta) {
+  logoCli = logoDe(meta);
   const emp = encabezadoEmpresa(meta);
   const generado = ahoraTexto();
   const paginas = [];
@@ -479,12 +488,12 @@ export function construirPdf(specs, meta) {
     nueva();
     // Logo de la marca arriba a la derecha
     if (logoPdf) {
-      const dos = !!(logoSub && esSublikaf(meta));
+      const dos = !!(logoCli);
       const hl = dos ? 46 : 62; const wl = hl * logoPdf.w / logoPdf.h;
       pag.logo = true;
       pag.ops.push(`q ${wl.toFixed(2)} 0 0 ${hl} ${(W - M - wl).toFixed(2)} ${Y(M + hl - 2)} cm /Im1 Do Q`);
       if (dos) { // primero el logo de Sublikaf y a su derecha el de la marca
-        const ws = hl * logoSub.w / logoSub.h;
+        const ws = hl * logoCli.w / logoCli.h;
         pag.logo2 = true;
         pag.ops.push(`q ${ws.toFixed(2)} 0 0 ${hl} ${(W - M - wl - 12 - ws).toFixed(2)} ${Y(M + hl - 2)} cm /Im2 Do Q`);
       }
@@ -742,8 +751,8 @@ export function construirPdf(specs, meta) {
   const idImg = logoPdf
     ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoPdf.w} /Height ${logoPdf.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoPdf.datos.length} >>\nstream\n${logoPdf.datos}\nendstream`)
     : 0;
-  const idImg2 = (logoSub && paginas.some((p) => p.logo2))
-    ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoSub.w} /Height ${logoSub.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoSub.datos.length} >>\nstream\n${logoSub.datos}\nendstream`)
+  const idImg2 = (logoCli && paginas.some((p) => p.logo2))
+    ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoCli.w} /Height ${logoCli.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoCli.datos.length} >>\nstream\n${logoCli.datos}\nendstream`)
     : 0;
   const ids = [];
   paginas.forEach((p) => {
