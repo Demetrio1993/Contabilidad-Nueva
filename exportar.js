@@ -165,7 +165,9 @@ function hojaXml(spec, meta, nombreHojaXl) {
   const cols = spec.columnas;
   const nc = cols.length;
   const filas = []; const uniones = [];
-  let r = 1;
+  // Empresa de Sublikaf: arriba van los dos logos (Sublikaf y luego el de la marca), en 4 filas libres
+  const conLogos = !!(logoPdf && logoSub && esSublikaf(meta));
+  let r = conLogos ? 5 : 1;
   const celda = (c, v, s) => {
     const ref = letraColumna(c) + r;
     if (v === null || v === undefined || v === '') return `<c r="${ref}" s="${s}"/>`;
@@ -272,10 +274,10 @@ function hojaXml(spec, meta, nombreHojaXl) {
   const colsXml = anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
   const union = uniones.length ? `<mergeCells count="${uniones.length}">${uniones.map((u) => `<mergeCell ref="${u}"/>`).join('')}</mergeCells>` : '';
   const ultima = `${letraColumna(colMax - 1)}${r - 1}`;
-  const dibujo = graficas.length ? '<drawing r:id="rId1"/>' : '';
+  const dibujo = (graficas.length || conLogos) ? '<drawing r:id="rId1"/>' : '';
   const xmlHoja = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${ultima}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${filaCongelar}" topLeftCell="A${filaCongelar + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="14"/><cols>${colsXml}</cols><sheetData>${filas.join('')}</sheetData>${union}<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${spec.horizontal ? 'landscape' : 'portrait'}" fitToWidth="1" fitToHeight="0"/>${dibujo}</worksheet>`;
-  return { xml: xmlHoja, graficas, nombre: nombreHojaXl };
+  return { xml: xmlHoja, graficas, nombre: nombreHojaXl, logos: conLogos };
 }
 
 /* ----- Gráficas nativas de Excel (DrawingML) ----- */
@@ -324,13 +326,21 @@ function chartXml(ref, hoja) {
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:roundedCorners val="0"/><c:chart>${titulo}<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>${plot}</c:plotArea>${leyenda ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' : ''}<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`;
 }
 
-function dibujoXml(refs) {
+// Logos de la hoja (en EMU): primero Sublikaf y a su derecha el de la marca; 4 filas de 14 pt = 56 pt de alto
+function logosXml(desdeId) {
+  const h = 50 * 12700; const y = 3 * 12700;
+  const w1 = Math.round(h * logoSub.w / logoSub.h); const w2 = Math.round(h * logoPdf.w / logoPdf.h);
+  const pic = (id, nombre, rid, x, w) => `<xdr:absoluteAnchor><xdr:pos x="${x}" y="${y}"/><xdr:ext cx="${w}" cy="${h}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${id}" name="${nombre}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:absoluteAnchor>`;
+  return pic(100, 'Logo Sublikaf', `rId${desdeId}`, 0, w1) + pic(101, 'Logo', `rId${desdeId + 1}`, w1 + 12 * 12700, w2);
+}
+
+function dibujoXml(refs, conLogos) {
   const anc = refs.map((ref, i) => {
     const f0 = ref.ancla - 1; const f1 = f0 + 16;
     return `<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${f0}</xdr:row><xdr:rowOff>60000</xdr:rowOff></xdr:from><xdr:to><xdr:col>6</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${f1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${i + 2}" name="Gráfica ${i + 1}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${i + 1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`;
   }).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${anc}</xdr:wsDr>`;
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${anc}${conLogos ? logosXml(refs.length + 1) : ''}</xdr:wsDr>`;
 }
 
 export function construirXlsx(specs, meta) {
@@ -340,11 +350,11 @@ export function construirXlsx(specs, meta) {
   const archivos = [];
   const dibujos = []; // { hoja: i, n: número de dibujo, refs }
   let nGraf = 0;
-  hojas.forEach((hj, i) => { if (hj.graficas.length) dibujos.push({ hoja: i, n: dibujos.length + 1, refs: hj.graficas, g0: nGraf + 1 }), nGraf += hj.graficas.length; });
+  hojas.forEach((hj, i) => { if (hj.graficas.length || hj.logos) dibujos.push({ hoja: i, n: dibujos.length + 1, refs: hj.graficas, g0: nGraf + 1, logos: !!hj.logos }), nGraf += hj.graficas.length; });
   const tiposExtra = dibujos.map((d) => `<Override PartName="/xl/drawings/drawing${d.n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join('')
     + Array.from({ length: nGraf }, (_, k) => `<Override PartName="/xl/charts/chart${k + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('');
   archivos.push(['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${specs.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}${tiposExtra}</Types>`]);
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${specs.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}${tiposExtra}</Types>`]);
   archivos.push(['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`]);
   archivos.push(['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -356,11 +366,15 @@ export function construirXlsx(specs, meta) {
   dibujos.forEach((d) => {
     archivos.push([`xl/worksheets/_rels/sheet${d.hoja + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${d.n}.xml"/></Relationships>`]);
-    archivos.push([`xl/drawings/drawing${d.n}.xml`, dibujoXml(d.refs)]);
+    archivos.push([`xl/drawings/drawing${d.n}.xml`, dibujoXml(d.refs, d.logos)]);
     archivos.push([`xl/drawings/_rels/drawing${d.n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${d.refs.map((_, k) => `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${d.g0 + k}.xml"/>`).join('')}</Relationships>`]);
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${d.refs.map((_, k) => `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${d.g0 + k}.xml"/>`).join('')}${d.logos ? `<Relationship Id="rId${d.refs.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-sublikaf.jpg"/><Relationship Id="rId${d.refs.length + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo-marca.jpg"/>` : ''}</Relationships>`]);
     d.refs.forEach((ref, k) => archivos.push([`xl/charts/chart${d.g0 + k}.xml`, chartXml(ref, nombres[d.hoja])]));
   });
+  if (dibujos.some((d) => d.logos)) {
+    archivos.push(['xl/media/logo-sublikaf.jpg', logoSub.bytes]);
+    archivos.push(['xl/media/logo-marca.jpg', logoPdf.bytes]);
+  }
   return zip(archivos);
 }
 
@@ -419,23 +433,29 @@ const VERDE = '0.043 0.420 0.341';
 const GRIS_FONDO = '0.933 0.953 0.945';
 const GRIS_LINEA = '0.82 0.85 0.84';
 
-// Logo para el encabezado de los PDF: se carga una vez al abrir la app (JPEG sobre fondo blanco).
-let logoPdf = null;
-fetch('logo-pdf.jpg').then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
-  if (!b) return;
-  const u = new Uint8Array(b);
-  let w = 0; let hh = 0;
-  for (let i = 2; i + 9 < u.length;) { // buscar el marcador de tamaño (SOF)
-    if (u[i] !== 0xff) { i++; continue; }
-    const m = u[i + 1];
-    if (m >= 0xc0 && m <= 0xc3) { hh = (u[i + 5] << 8) | u[i + 6]; w = (u[i + 7] << 8) | u[i + 8]; break; }
-    i += 2 + ((u[i + 2] << 8) | u[i + 3]);
-  }
-  if (!w || !hh) return;
-  let s = '';
-  for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192));
-  logoPdf = { w, h: hh, datos: s };
-}).catch(() => {});
+// Logos para el encabezado: el de la marca (se carga una vez al abrir la app, JPEG sobre fondo blanco)
+// y el de Sublikaf, que solo se usa en los informes de la empresa de Freddy Abdel Rodríguez García (Sublikaf).
+function leerJpeg(url, asignar) {
+  fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
+    if (!b) return;
+    const u = new Uint8Array(b);
+    let w = 0; let hh = 0;
+    for (let i = 2; i + 9 < u.length;) { // buscar el marcador de tamaño (SOF)
+      if (u[i] !== 0xff) { i++; continue; }
+      const m = u[i + 1];
+      if (m >= 0xc0 && m <= 0xc3) { hh = (u[i + 5] << 8) | u[i + 6]; w = (u[i + 7] << 8) | u[i + 8]; break; }
+      i += 2 + ((u[i + 2] << 8) | u[i + 3]);
+    }
+    if (!w || !hh) return;
+    let s = '';
+    for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192));
+    asignar({ w, h: hh, datos: s, bytes: u });
+  }).catch(() => {});
+}
+let logoPdf = null; let logoSub = null;
+leerJpeg('logo-pdf.jpg', (x) => { logoPdf = x; });
+leerJpeg('logo-sublikaf.jpg', (x) => { logoSub = x; });
+const esSublikaf = (meta) => /sublikaf|freddy\s+abdel/i.test(String(((meta && meta.empresa) || {}).razon_social || ''));
 
 export function construirPdf(specs, meta) {
   const emp = encabezadoEmpresa(meta);
@@ -459,9 +479,15 @@ export function construirPdf(specs, meta) {
     nueva();
     // Logo de la marca arriba a la derecha
     if (logoPdf) {
-      const hl = 62; const wl = hl * logoPdf.w / logoPdf.h;
+      const dos = !!(logoSub && esSublikaf(meta));
+      const hl = dos ? 46 : 62; const wl = hl * logoPdf.w / logoPdf.h;
       pag.logo = true;
       pag.ops.push(`q ${wl.toFixed(2)} 0 0 ${hl} ${(W - M - wl).toFixed(2)} ${Y(M + hl - 2)} cm /Im1 Do Q`);
+      if (dos) { // primero el logo de Sublikaf y a su derecha el de la marca
+        const ws = hl * logoSub.w / logoSub.h;
+        pag.logo2 = true;
+        pag.ops.push(`q ${ws.toFixed(2)} 0 0 ${hl} ${(W - M - wl - 12 - ws).toFixed(2)} ${Y(M + hl - 2)} cm /Im2 Do Q`);
+      }
     }
     // Bloque de encabezado del informe
     texto(emp.nombre, M, y + 11, 13, true); y += 16;
@@ -716,11 +742,14 @@ export function construirPdf(specs, meta) {
   const idImg = logoPdf
     ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoPdf.w} /Height ${logoPdf.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoPdf.datos.length} >>\nstream\n${logoPdf.datos}\nendstream`)
     : 0;
+  const idImg2 = (logoSub && paginas.some((p) => p.logo2))
+    ? agregar(`<< /Type /XObject /Subtype /Image /Width ${logoSub.w} /Height ${logoSub.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoSub.datos.length} >>\nstream\n${logoSub.datos}\nendstream`)
+    : 0;
   const ids = [];
   paginas.forEach((p) => {
     const contenido = p.ops.join('\n');
     const idC = agregar(`<< /Length ${contenido.length} >>\nstream\n${contenido}\nendstream`);
-    const idP = agregar(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.W.toFixed(2)} ${p.H.toFixed(2)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${p.logo && idImg ? ` /XObject << /Im1 ${idImg} 0 R >>` : ''} >> /Contents ${idC} 0 R >>`);
+    const idP = agregar(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.W.toFixed(2)} ${p.H.toFixed(2)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${p.logo && idImg ? ` /XObject << /Im1 ${idImg} 0 R${p.logo2 && idImg2 ? ` /Im2 ${idImg2} 0 R` : ''} >>` : ''} >> /Contents ${idC} 0 R >>`);
     ids.push(idP);
   });
   objetos[1] = `<< /Type /Pages /Kids [${ids.map((i) => `${i} 0 R`).join(' ')}] /Count ${ids.length} >>`;

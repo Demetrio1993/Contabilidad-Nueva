@@ -1,10 +1,10 @@
 // Service worker: permite instalar la app y, si no hay internet, abrir la
 // última versión guardada. Siempre intenta primero la red para que las
 // actualizaciones lleguen. No guarda nada de Supabase ni de otros sitios.
-const CACHE = 'contabilidad-v44';
+const CACHE = 'contabilidad-v45';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib.js', 'terceros.js',
                   'transacciones.js', 'ocr.js', 'informes.js', 'exportar.js', 'estados.js', 'cierre.js', 'fiscal.js', 'cartera.js', 'activos.js', 'acciones.js', 'analisis.js', 'panel.js', 'facturaxml.js', 'bitacora.js', 'acceso.js', 'conciliacion.js', 'inventario.js', 'config.js', 'xlsxleer.js', 'importarlogica.js', 'importar.js', 'graficas.js', 'vencimientos.js', 'soportes.js', 'notascredito.js', 'recurrentes.js', 'extracto.js', 'respaldo.js', 'comentarios.js', 'verificacion.js', 'presupuesto.js', 'auxiliares.js', 'dr.js', 'cierrefiscal.js', 'manifest.json',
-                  'icon-192.png', 'icon-512.png', 'logo-completo.png', 'logo-marca.png', 'logo-pdf.jpg'];
+                  'icon-192.png', 'icon-512.png', 'logo-completo.png', 'logo-marca.png', 'logo-pdf.jpg', 'logo-sublikaf.jpg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
