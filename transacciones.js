@@ -8,6 +8,7 @@ import { bloqueNotasCredito } from './notascredito.js';
 import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
 import { avisoRespaldo } from './respaldo.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux } from './auxiliares.js';
+import { abrirFacturasDgi, contarFacturasDgi, lecturaDeFila } from './facturasdgi.js';
 import { panelComentarios, pendientesAbiertos, contarPendientesEmpresa, abrirPendientes } from './comentarios.js';
 
 const TIPOS_TRX = {
@@ -70,6 +71,7 @@ export async function vistaTransacciones(id) {
   let hayFiscal = true;         // false si aún no se ejecutó el archivo 62
   let notasMes = [];            // notas de crédito con fecha en el mes (para los totales)
   let notasPorTrx = {};         // notas de crédito vigentes de cada transacción cargada
+  let dgiPend = 0;              // facturas de la DGI cargadas que faltan por revisar
   let recurrentesPend = 0;      // movimientos recurrentes que ya tocan
   let pendMapa = {};            // pendientes abiertos por transacción (comentarios)
   let pendTotal = 0;            // pendientes abiertos de toda la empresa
@@ -113,6 +115,7 @@ export async function vistaTransacciones(id) {
       if (!np.error) for (const n of np.data || []) notasPorTrx[n.transaccion_id] = (notasPorTrx[n.transaccion_id] || 0) + Number(n.monto_neto);
     }
     recurrentesPend = await contarPendientes(id);
+    dgiPend = (await contarFacturasDgi(id)) || 0;
     pendMapa = (await pendientesAbiertos(id, filas.map((t) => t.id))) || {};
     pendTotal = (await contarPendientesEmpresa(id)) || 0;
     pintar();
@@ -120,6 +123,7 @@ export async function vistaTransacciones(id) {
 
   function pintar() {
     btnComent.textContent = pendTotal ? `Pendientes (${pendTotal})` : 'Pendientes';
+    btnDgi.textContent = dgiPend ? `Facturas de la DGI (${dgiPend} por revisar)` : 'Facturas de la DGI';
     btnRec.textContent = recurrentesPend ? `⏰ Movimientos recurrentes (${recurrentesPend} por registrar)` : 'Movimientos recurrentes';
     const suma = (tipos, campoN) => filas.filter((t) => !t.anulada && tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
@@ -299,7 +303,7 @@ export async function vistaTransacciones(id) {
       h('button', { class: 'btn btn-sec btn-bloque', type: 'button', onclick: () => cerrar() }, 'Cancelar')));
   }
 
-  function abrirNueva(editando, lineasIni) {
+  function abrirNueva(editando, lineasIni, previa) {
     const st = {
       tipo: 'gasto', fecha: hoyISO(), tercero: '', factura: '', descripcion: '', bruto: '',
       modoItbms: '7', itbmsManual: '', forma: 'contado', principal: '', contra: '', todas: false,
@@ -341,6 +345,7 @@ export async function vistaTransacciones(id) {
       if (st.tipo === 'otro') st.contra = '';
     }
     porDefecto();
+    if (previa) { st.tipo = previa.tipo; porDefecto(); }
     if (editando) {
       st.tipo = editando.tipo; st.fecha = editando.fecha;
       porDefecto();
@@ -416,6 +421,13 @@ export async function vistaTransacciones(id) {
     const normR = (v) => String(v || '').replace(/[\s.\-]/g, '').toUpperCase();
     const normN = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    // Si la transacción nació de la bandeja de la DGI, la fila sale de pendientes y queda ligada a lo registrado
+    async function cerrarFacturaDgi(transaccionId) {
+      if (!previa || editando || !transaccionId) return;
+      const r = await db.rpc('marcar_factura_dgi', { p_id: previa.f.id, p_estado: 'registrada', p_transaccion: transaccionId, p_nota: null });
+      if (r.error) toast('Se registró, pero la factura no salió de pendientes: ' + traducirError(r.error), 'error');
+    }
+
     function esLaEmpresa(p) {
       if (!p) return false;
       if (empresa.ruc && p.ruc && normR(empresa.ruc) === normR(p.ruc)) return true;
@@ -552,9 +564,11 @@ export async function vistaTransacciones(id) {
         catch (e) { toast('Se registró, pero no se pudo guardar el archivo adjunto: ' + traducirError(e), 'error'); }
       }
       toast(editando ? 'Cambios guardados.' : 'Transacción registrada con su asiento contable.', 'ok');
+      await cerrarFacturaDgi(nuevoId);
       cerrar();
       mes = st.fecha.slice(0, 7);
       await cargarMes();
+      if (previa) abrirBandeja();
     }
 
     // ----- Varias cuentas: cualquier tipo de transacción puede llevar más de dos líneas -----
@@ -614,10 +628,16 @@ export async function vistaTransacciones(id) {
         try { await subirSoporte({ empresaId: id, transaccionId: nuevoId, archivo: st.soporte }); }
         catch (e) { toast('Se registró, pero no se pudo guardar el archivo adjunto: ' + traducirError(e), 'error'); }
       }
+      if (!editando && st.lectura && st.lectura.cufe && nuevoId) {
+        const c = await db.rpc('asignar_cufe', { p_transaccion: nuevoId, p_cufe: st.lectura.cufe });
+        if (c.error) toast('Se registró, pero no se pudo guardar el código de la factura electrónica: ' + traducirError(c.error), 'error');
+      }
       toast(editando ? 'Cambios guardados.' : (st.tipo === 'compuesto' ? 'Asiento compuesto registrado.' : 'Registrado.'), 'ok');
+      await cerrarFacturaDgi(nuevoId);
       cerrar();
       mes = st.fecha.slice(0, 7);
       await cargarMes();
+      if (previa) abrirBandeja();
     }
 
     function pintarCompuesto() {
@@ -724,7 +744,7 @@ export async function vistaTransacciones(id) {
 
       const tipoSel = h('select', {
         value: st.tipo,
-        onchange: (e) => { st.tipo = e.target.value; porDefecto(); pintarForm(); }
+        onchange: (e) => { st.tipo = e.target.value; porDefecto(); if (previa) aplicarLectura(previa.d); else pintarForm(); }
       }, Object.entries(TIPOS_TRX).map(([v, n]) => h('option', { value: v }, n)));
 
       const brutoIn = h('input', {
@@ -862,8 +882,9 @@ export async function vistaTransacciones(id) {
       actualizarTotales();
     }
 
-    cerrar = modal(editando ? 'Editar transacción' : 'Nueva transacción', cuerpo);
+    cerrar = modal(editando ? 'Editar transacción' : (previa ? 'Registrar factura de la DGI' : 'Nueva transacción'), cuerpo);
     pintarForm();
+    if (previa) aplicarLectura(previa.d);
   }
 
   selMes.addEventListener('change', async () => { if (selMes.value) { mes = selMes.value; await cargarMes(); } });
@@ -874,6 +895,13 @@ export async function vistaTransacciones(id) {
     class: 'btn btn-sec btn-peq', type: 'button',
     onclick: () => abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar: cargarMes, auxDatos })
   }, 'Movimientos recurrentes');
+  function abrirBandeja() {
+    abrirFacturasDgi({
+      empresa, terceros, alCambiar: cargarMes,
+      alRegistrar: (f) => abrirNueva(null, null, { f, tipo: f.sentido === 'emitida' ? 'venta' : 'gasto', d: lecturaDeFila(f, empresa) })
+    });
+  }
+  const btnDgi = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: abrirBandeja }, 'Facturas de la DGI');
   const btnComent = h('button', {
     class: 'btn btn-sec btn-peq', type: 'button',
     onclick: () => abrirPendientes({
@@ -900,7 +928,7 @@ export async function vistaTransacciones(id) {
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir (editar, anular o eliminar) las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
-    h('div', { class: 'acciones' }, btnComent, btnPend, btnRec),
+    h('div', { class: 'acciones' }, btnDgi, btnComent, btnPend, btnRec),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))

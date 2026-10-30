@@ -16,7 +16,7 @@ const TABLAS = [
   ['notas_eeff', 'empresa_id'], ['notas_eeff_anterior', 'empresa_id'], ['notas_detalle', 'empresa_id'],
   ['recurrentes', 'empresa_id'], ['vencimientos', 'empresa_id'], ['vencimientos_cumplidos', 'empresa_id'],
   ['importaciones', 'empresa_id'], ['bitacora', 'empresa_id'],
-  ['auxiliares', 'empresa_id'], ['impuestos_config', 'empresa_id'], ['impuestos_anio', 'empresa_id'], ['dr_manual', 'empresa_id'], ['dr_opciones', 'empresa_id'], ['inventario_estado', 'empresa_id'],
+  ['auxiliares', 'empresa_id'], ['impuestos_config', 'empresa_id'], ['impuestos_anio', 'empresa_id'], ['dr_manual', 'empresa_id'], ['dr_opciones', 'empresa_id'], ['inventario_estado', 'empresa_id'], ['facturas_dgi', 'empresa_id'],
   ['dr_aprobaciones', 'empresa_id'], ['presupuestos', 'empresa_id'], ['comentarios_transaccion', 'empresa_id'], ['empresa_usuarios', 'empresa_id']
 ];
 const PAGINA = 1000;
@@ -158,7 +158,7 @@ const TABLAS_EXTRA = [
   ['cifras_anteriores', 'Datos cifras ant.', 'Cifras de años anteriores'], ['itbms_manual', 'Datos ITBMS manual', 'ITBMS escrito a mano'],
   ['notas_eeff', 'Datos notas EEFF', 'Notas a los estados financieros'], ['notas_detalle', 'Datos notas detalle', 'Detalle de notas'],
   ['impuestos_config', 'Datos impuestos conf.', 'Configuración de impuestos'], ['impuestos_anio', 'Datos ISR por año', 'Impuesto sobre la renta por año'],
-  ['dr_manual', 'Datos renta manual', 'Montos escritos a mano en la declaración'], ['dr_aprobaciones', 'Datos aprobaciones', 'Aprobaciones de la declaración'], ['dr_opciones', 'Datos renta opciones', 'Opciones de la declaración (edad para la CSS)'], ['inventario_estado', 'Datos inventario EEFF', 'Inventario inicial y final del estado de resultados'],
+  ['dr_manual', 'Datos renta manual', 'Montos escritos a mano en la declaración'], ['dr_aprobaciones', 'Datos aprobaciones', 'Aprobaciones de la declaración'], ['dr_opciones', 'Datos renta opciones', 'Opciones de la declaración (edad para la CSS)'], ['inventario_estado', 'Datos inventario EEFF', 'Inventario inicial y final del estado de resultados'], ['facturas_dgi', 'Datos facturas DGI', 'Facturas de la DGI por revisar'],
   ['periodos', 'Datos períodos', 'Períodos cerrados'], ['empresa_usuarios', 'Datos usuarios', 'Usuarios de la empresa'],
   ['soportes', 'Datos soportes', 'Lista de soportes adjuntos'], ['importaciones', 'Datos importaciones', 'Importaciones'],
   ['comentarios_transaccion', 'Datos comentarios', 'Comentarios'], ['bitacora', 'Bitácora', 'Bitácora de cambios']
