@@ -229,11 +229,12 @@ export async function vistaInformes(id) {
 
   const ORIENTE = (o) => ORIGENES[o] || o;
   const nulo0 = (v) => (Number(v || 0) === 0 ? null : Number(v));
+  const soloConsulta = empresa.rol === 'lector' || empresa.rol === 'auxiliar';
   const archivoDe = (informe) => `${empresa.razon_social}-${informe}-${est.modo === 'anio' ? est.anio : est.mes}`;
 
   /* ---- diario ---- */
   function accionesAsiento(a, ls) {
-    if (empresa.rol === 'lector') return null;   // el lector solo consulta
+    if (soloConsulta) return null;   // el lector y el auxiliar solo consultan
     const manual = ['manual', 'ajuste', 'apertura'].includes(a.origen);
     const esAnulacion = a.origen === 'ajuste' && String(a.referencia || '').startsWith('ANULA-');
     if (!manual) {
@@ -343,7 +344,7 @@ export async function vistaInformes(id) {
             toast('Asientos numerados en orden de fecha.', 'ok'); pintar();
           } }, 'Ordenar números por fecha')
           : h('p', { class: 'ayuda' }, 'Pídele al administrador o al contador que los ordene.')) : null,
-      empresa.rol === 'lector' ? null : h('div', { class: 'acciones' },
+      soloConsulta ? null : h('div', { class: 'acciones' },
         h('button', { class: 'btn', type: 'button', onclick: () => abrirAjuste(id, cuentas, rango()[1], pintar) }, '+ Asiento de ajuste')),
       data.length ? tarjetas : h('p', { class: 'ayuda' }, 'No hay asientos en este período.'));
     const spec = data.length ? {
@@ -665,7 +666,7 @@ export async function vistaInformes(id) {
       extra.push(h('label', { class: 'fila-check' },
         h('input', { type: 'checkbox', checked: est.verCeros, onchange: (e) => { est.verCeros = e.target.checked; pintar(); } }),
         h('span', null, 'Mostrar auxiliares sin movimiento ni saldo')));
-      if (puedeCrearAux(empresa.rol)) {
+      if (puedeCrearAux(empresa.rol) && !soloConsulta) {
         extra.push(h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: nuevoAuxiliar }, '+ Nuevo auxiliar'));
       }
     }

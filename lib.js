@@ -10,7 +10,7 @@ if (!window.supabase) {
 export const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export const estado = { email: '', recuperando: false, roles: {} };
 // Número de versión que se muestra al pie. La descripción de cada versión es solo interna (manual y memoria).
-export const VERSION = '46';
+export const VERSION = '47';
 // Versión 31: catálogo reorganizado (gastos de operación y financieros), auxiliares por cuenta y cuadros con todos los montos.
 
 // Crea elementos del DOM sin usar innerHTML (los datos nunca se interpretan como HTML)
@@ -138,11 +138,14 @@ export const PESTANAS_LECTOR = ['panel', 'informes', 'estados', 'presupuesto', '
 export const esLector = (rol) => rol === 'lector';
 export const pestanaInicial = (rol) => (rol === 'lector' ? 'panel' : 'transacciones');
 
-// El auxiliar solo ve Transacciones (y Clientes y prov. si el administrador se lo habilitó)
+// El auxiliar ve estas pestañas: en Transacciones, Activos, Inventario y Clientes y prov. registra, edita, anula
+// y elimina; en Informes y Cobrar y pagar solo consulta, descarga y comparte. Una pestaña nueva queda oculta
+// para él hasta que se agregue aquí a propósito.
+export const PESTANAS_AUXILIAR = ['transacciones', 'informes', 'cartera', 'activos', 'inventario', 'terceros'];
 export function pestanaPermitida(rol, permisos, clave) {
   if (rol === 'lector') return PESTANAS_LECTOR.includes(clave);
   if (rol !== 'auxiliar') return true;
-  return clave === 'transacciones' || clave === 'terceros';
+  return PESTANAS_AUXILIAR.includes(clave);
 }
 
 // Rol de la persona en la empresa (se guarda para no consultarlo en cada pantalla)

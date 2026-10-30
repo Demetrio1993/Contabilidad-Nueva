@@ -175,7 +175,7 @@ export async function vistaTransacciones(id) {
     let cerrar;
     const dato = (etq, val) => val ? h('p', null, h('strong', null, etq + ': '), val) : null;
     const recargar = async () => { cerrar(); await cargarMes(); };
-    const puedeCorregir = !soloRegistra || (miId && t.creado_por === miId);
+    const puedeCorregir = !soloRegistra || (miId && t.creado_por === miId);   // el auxiliar corrige solo las suyas
     const acciones = !puedeCorregir ? null : barraAcciones({
       editar: t.anulada ? null : () => {
         if (notasPorTrx[t.id]) { toast('Esta factura tiene notas de crédito. Elimínalas antes de editarla.', 'error'); return; }
@@ -897,7 +897,7 @@ export async function vistaTransacciones(id) {
 
   mostrar(marcoEmpresa(empresa, 'transacciones', [
     avisoRespaldo(empresa),
-    soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir las que tú registraste.') : null,
+    soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir (editar, anular o eliminar) las que tú registraste.') : null,
     h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
     resumen,
     h('div', { class: 'acciones' }, btnComent, btnPend, btnRec),
