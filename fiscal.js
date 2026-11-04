@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { barraExportar } from './informes.js';
 import { n2 } from './exportar.js';
+import { abrirFormatoDgi } from './formatodgi.js';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -185,6 +186,9 @@ async function seccionAnexos(id, empresa, zona) {
         ? { specs: specsAnexos2(est.det, est.pend, est.anio), archivo: `${empresa.razon_social}-anexos-dr-${est.anio}` }
         : null)
     }),
+    h('div', { class: 'acciones' },
+      h('button', { class: 'btn', type: 'button', onclick: () => abrirFormatoDgi({ empresa: { ...empresa, id }, anio: est.anio }) },
+        'Descargar Formato DR/DGI')),
     cuerpo);
   await pintar();
 }
