@@ -50,7 +50,7 @@ export async function reunirDatos(id, progreso) {
 // Si el archivo 74 aún no se ejecutó o la empresa es muy grande, lee tabla por tabla como antes.
 export async function obtenerRespaldo(id, progreso) {
   const r = await db.rpc('exportar_empresa', { p_empresa: id });
-  if (!r.error && r.data && r.data.tablas) return { empresa: r.data.empresa, tablas: r.data.tablas, informes: r.data.informes || null, omitidas: [], completo: true };
+  if (!r.error && r.data && r.data.tablas) return { empresa: r.data.empresa, tablas: r.data.tablas, informes: r.data.informes || null, generales_contador: r.data.generales_contador || null, omitidas: [], completo: true };
   const d = await reunirDatos(id, progreso);
   return { ...d, completo: false };
 }
@@ -199,6 +199,11 @@ function hojasAdicionales(d) {
     const x = hojaGenerica(corto, largo, (d.tablas || {})[k], d);
     if (x) out.push(x);
   }
+  const g = d.generales_contador;
+  if (Array.isArray(g) && g.length) {
+    const x = hojaGenerica('Generales contador', 'Generales del contador', g.map((r) => ({ ...(r.datos || {}), actualizado_en: r.actualizado_en })), d);
+    if (x) out.push(x);
+  }
   return out;
 }
 
@@ -280,7 +285,7 @@ export function seccionRespaldo(empresa) {
       const d = await obtenerRespaldo(empresa.id, (i, total, t) => { estado.textContent = `Reuniendo datos… ${i + 1} de ${total} (${t})`; });
       const fecha = hoy();
       if (tipo === 'json') {
-        const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: d.completo ? (d.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: d.empresa, tablas: d.tablas, informes: d.informes || undefined });
+        const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: d.completo ? (d.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: d.empresa, tablas: d.tablas, informes: d.informes || undefined, generales_contador: d.generales_contador || undefined });
         descargar(new TextEncoder().encode(cuerpo), `respaldo-${nombre()}-${fecha}.json`, 'application/json');
       } else {
         const meta = { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } };
@@ -338,11 +343,12 @@ function seccionRestaurar(empresa, nombre) {
       try {
         if (existe) {
           const actual = await obtenerRespaldo(empresa.id);
-          const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: actual.completo ? (actual.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: actual.empresa, tablas: actual.tablas, informes: actual.informes || undefined });
+          const cuerpo = JSON.stringify({ formato: 'respaldo-contabilidad-pymes', version: actual.completo ? (actual.informes ? 3 : 2) : 1, fecha: new Date().toISOString(), empresa: actual.empresa, tablas: actual.tablas, informes: actual.informes || undefined, generales_contador: actual.generales_contador || undefined });
           descargar(new TextEncoder().encode(cuerpo), `antes-de-restaurar-${nombre()}-${hoy()}.json`, 'application/json');
         }
         const r = await db.rpc('restaurar_empresa', { p_json: j, p_reemplazar: existe });
         if (r.error) throw r.error;
+        try { await db.rpc('restaurar_generales_contador', { p_json: j }); } catch (e) { /* sin el archivo 112 no se recuperan los generales */ }
         toast('Empresa restaurada.', 'ok');
         irA(`#/empresa/${r.data.empresa_id}/transacciones`);
       } catch (e) {
