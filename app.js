@@ -7,6 +7,7 @@ import { vistaTerceros } from './terceros.js';
 import { vistaTransacciones } from './transacciones.js';
 import { vistaInformes } from './informes.js';
 import { vistaEstados } from './estados.js';
+import { vistaEstadosPymes } from './efpymes.js';
 import { vistaCierre } from './cierre.js';
 import { vistaPresupuesto } from './presupuesto.js';
 import { vistaImpuestos } from './fiscal.js';
@@ -506,6 +507,7 @@ async function render() {
       if (p[2] === 'catalogo') await vistaCatalogo(id);
       else if (p[2] === 'informes') await vistaInformes(id);
       else if (p[2] === 'estados') await vistaEstados(id);
+      else if (p[2] === 'efpymes') await vistaEstadosPymes(id);
       else if (p[2] === 'cierre') await vistaCierre(id);
       else if (p[2] === 'presupuesto') await vistaPresupuesto(id);
       else if (p[2] === 'impuestos') await vistaImpuestos(id);

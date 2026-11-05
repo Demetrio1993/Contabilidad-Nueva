@@ -830,4 +830,11 @@ export async function compartirArchivoInforme(specs, meta, archivo, tipo) {
   return 'descargado';
 }
 
+/* ============== piezas internas que usa el módulo de Estados Financieros Pymes ============== */
+// Solo se exponen las herramientas de dibujo y de archivo; ningún informe existente cambia.
+export const interno = {
+  anchoTexto, literal, partirLineas, zip, xml, letraColumna, ahoraTexto, MIME_XLSX,
+  logosDe: (meta) => ({ marca: logoPdf, cliente: logoDe(meta) })
+};
+
 // FIN DEL ARCHIVO exportar.js
