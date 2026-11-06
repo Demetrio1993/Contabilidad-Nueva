@@ -1,7 +1,7 @@
 // Service worker: permite instalar la app y, si no hay internet, abrir la
 // última versión guardada. Siempre intenta primero la red para que las
 // actualizaciones lleguen. No guarda nada de Supabase ni de otros sitios.
-const CACHE = 'contabilidad-v52';
+const CACHE = 'contabilidad-v53';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib.js', 'terceros.js',
                   'transacciones.js', 'ocr.js', 'informes.js', 'exportar.js', 'estados.js', 'cierre.js', 'fiscal.js', 'cartera.js', 'activos.js', 'acciones.js', 'analisis.js', 'panel.js', 'facturaxml.js', 'bitacora.js', 'acceso.js', 'conciliacion.js', 'inventario.js', 'config.js', 'xlsxleer.js', 'facturasdgi.js', 'formatodgi.js', 'importarlogica.js', 'importar.js', 'graficas.js', 'vencimientos.js', 'soportes.js', 'notascredito.js', 'recurrentes.js', 'extracto.js', 'respaldo.js', 'comentarios.js', 'verificacion.js', 'presupuesto.js', 'auxiliares.js', 'dr.js', 'drsal.js', 'qr.js', 'cierrefiscal.js', 'efpymes.js', 'efpymesdatos.js', 'efpymesnotas.js', 'efpymespdf.js', 'efpymescert.js', 'manifest.json',
                   'icon-192.png', 'icon-512.png', 'logo-completo.png', 'logo-marca.png', 'logo-pdf.jpg', 'logo-sublikaf.jpg', 'logo-acse.jpg'];

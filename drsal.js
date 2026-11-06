@@ -15,6 +15,7 @@ const CONCEPTOS = [
 const NUM = (v) => Number(v || 0);
 const r2 = (v) => Math.round((NUM(v) + Number.EPSILON) * 100) / 100;
 
+
 export async function vistaDrAsalariados(id) {
   mostrar(marcoEmpresa({ id, razon_social: '…' }, 'drsal', cargando()));
   const empresa = await cargarEmpresa(id);

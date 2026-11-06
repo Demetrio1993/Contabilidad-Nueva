@@ -75,6 +75,9 @@ export async function leerDesdeQr(texto, { contexto, empresa } = {}) {
       lectura.observaciones += ` El CUFE indica documento tipo ${info.tipo} (no es una factura de operación interna); si es nota de crédito, anula o corrige la factura original.`;
     }
   }
+  // La descripción es el detalle de la factura: todos los renglones (sin repetir), no solo un resumen
+  const nombres = [...new Set((lectura.items || []).map((i) => String(i.descripcion || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  if (nombres.length) lectura.descripcion = nombres.join('; ').slice(0, 240);
   lectura.cuenta_sugerida = null;
   return lectura;
 }

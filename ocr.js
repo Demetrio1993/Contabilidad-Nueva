@@ -81,7 +81,7 @@ export function normalizarLectura(d) {
 
 // Supabase a veces nombra las funciones solas (bright-api, etc.). Se prueban
 // los nombres posibles y se usa el primero que responda.
-const NOMBRES_FUNCION = ['ocr-factura', 'bright-api'];
+const NOMBRES_FUNCION = ['ocr-factura', 'dynamic-worker', 'bright-api'];
 let nombreFuncion = null;
 
 async function ubicarFuncion() {
@@ -144,31 +144,43 @@ export async function leerFactura(archivo, contexto) {
 
 // Pide a la función la factura que está detrás del QR de la DGI. Devuelve { xml } o { datos }.
 export async function leerQrServidor(url, contexto) {
-  const nombre = await ubicarFuncion();
   const { data: sesion } = await db.auth.getSession();
   const token = (sesion && sesion.session && sesion.session.access_token) || SUPABASE_ANON_KEY;
-  let r;
-  try {
-    r = await fetch(SUPABASE_URL + '/functions/v1/' + nombre, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ modo: 'qr', url, rol: contexto && contexto.rol, contribuyente: contexto && contexto.contribuyente })
-    });
-  } catch (_e) {
-    nombreFuncion = null;
-    throw new Error('se perdió la conexión con la función de lectura');
+  const cuerpo = JSON.stringify({ modo: 'qr', url, rol: contexto && contexto.rol, contribuyente: contexto && contexto.contribuyente });
+  // Se prueba la función ya ubicada y luego las demás con otro nombre: una copia vieja (sin modo qr) contesta
+  // "Archivo no válido" y se pasa a la siguiente.
+  let primero = null;
+  try { primero = await ubicarFuncion(); } catch (e) { if (/GEMINI_API_KEY/.test(String(e && e.message))) throw e; }
+  const orden = [...new Set([primero, ...NOMBRES_FUNCION].filter(Boolean))];
+  let ultimo = null; let vieja = false;
+  for (const nombre of orden) {
+    let r;
+    try {
+      r = await fetch(SUPABASE_URL + '/functions/v1/' + nombre, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token },
+        body: cuerpo
+      });
+    } catch (_e) { ultimo = new Error('se perdió la conexión con la función de lectura'); continue; }
+    if (r.status === 404) continue;
+    let resp = null;
+    try { resp = await r.json(); } catch (_e) { /* sin cuerpo */ }
+    if (!r.ok) {
+      const detalle = (resp && (resp.error || resp.message)) || '';
+      if (r.status === 400 && /Archivo no válido/.test(detalle)) { vieja = true; continue; }
+      if (r.status === 401) { ultimo = new Error('la función rechazó el acceso (401): desactiva "Verify JWT" en sus ajustes'); continue; }
+      ultimo = new Error(detalle || 'error de la función (código ' + r.status + ')');
+      if (r.status === 502 || r.status === 400) throw ultimo; // la función nueva contestó: ese es el motivo real
+      continue;
+    }
+    if (nombre !== primero) nombreFuncion = nombre;
+    if (resp && resp.xml) return { xml: resp.xml };
+    if (resp && resp.datos) return { datos: resp.datos };
+    throw new Error((resp && resp.error) || 'la DGI no devolvió datos');
   }
-  let resp = null;
-  try { resp = await r.json(); } catch (_e) { /* sin cuerpo */ }
-  if (!r.ok) {
-    const detalle = (resp && (resp.error || resp.message)) || '';
-    if (r.status === 400 && /Archivo no válido/.test(detalle)) throw new Error('la función ocr-factura está en una versión anterior: pega el código nuevo (ocr-factura.txt) en Supabase');
-    if (r.status === 401) throw new Error('la función rechazó el acceso (401): desactiva "Verify JWT" en sus ajustes');
-    throw new Error(detalle || 'error de la función (código ' + r.status + ')');
-  }
-  if (resp && resp.xml) return { xml: resp.xml };
-  if (resp && resp.datos) return { datos: resp.datos };
-  throw new Error((resp && resp.error) || 'la DGI no devolvió datos');
+  if (ultimo) throw ultimo;
+  if (vieja) throw new Error('las funciones de Supabase que respondieron son de una versión anterior: pega el código nuevo (ocr-factura.txt) en la función ocr-factura (dynamic-worker)');
+  throw new Error('no se encontró la función de lectura');
 }
 
 // Panel con los botones "Tomar foto" y "Elegir imagen o PDF"
