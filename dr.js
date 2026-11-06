@@ -292,7 +292,7 @@ export async function vistaRenta(id) {
       onclick: clic ? () => (f.fila === 'calculo' ? ayudaRenglon(f) : detalleRenglon(f)) : null },
       h('td', null, f.descripcion,
         f.fila === 'calculo' && f.formula && f.formula !== 'A mano' ? h('div', { class: 'ayuda dr-formula' }, `= ${f.formula}`) : null,
-        f.manual && f.nota ? h('div', { class: 'ayuda' }, f.nota) : null),
+        (f.manual || /^Viene de DR Cálculos/.test(f.nota || '')) && f.nota ? h('div', { class: 'ayuda' }, f.nota) : null),
       h('td', { class: 'centro' }, f.renglon == null ? '' : h('span', { class: 'dr-pildora' }, String(f.renglon))),
       h('td', { class: 'centro' }, f.anexos || ''),
       h('td', { class: 'num' + (f.manual ? ' dr-manual' : '') }, hay ? n2(f.monto) : '', lapiz));

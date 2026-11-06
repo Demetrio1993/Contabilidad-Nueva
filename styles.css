@@ -306,4 +306,63 @@ textarea { width: 100%; padding: 10px 12px; font-size: 1rem; font-family: inheri
 .hero-grande .hero-nombre, .hero-grande .hero-cpa, .hero-grande .hero-lema { display: none; }
 .entrada { max-width: 460px; padding-top: 18px; }
 
+/* Auxiliares: filas que se pueden tocar y selector dentro de las líneas de un asiento */
+.tabla tr.fila-click { cursor: pointer; }
+.tabla tr.fila-click:hover td { background: color-mix(in srgb, var(--verde) 10%, transparent); }
+.linea-ajuste .campo { margin: 4px 0; }
+.aux-fila { display: block; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; border-bottom: 1px solid var(--borde); padding: 10px 2px; }
+.aux-click { cursor: pointer; }
+.aux-nombre { font-weight: 700; margin-bottom: 6px; }
+.aux-cifras { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 0.78rem; }
+.aux-cifras div { display: flex; flex-direction: column; }
+.aux-cifras strong { font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+.aux-total { border-bottom: 0; border-top: 2px solid var(--borde); }
+
+
+/* ---- Declaración de renta ---- */
+.dr-cabecera { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.dr-cabecera div { display: flex; flex-direction: column; }
+.dr-cursiva { font-style: italic; }
+.dr-encabezado { text-align: center; padding: 14px 12px; }
+.dr-encabezado .dr-dgi { font-weight: 700; letter-spacing: .04em; }
+.dr-encabezado .dr-titulo-form { margin-top: 6px; font-size: .9rem; line-height: 1.35; }
+.dr-encabezado .dr-version { margin-top: 8px; font-style: italic; font-weight: 600; }
+.dr-formula { font-size: .78rem; margin-top: 2px; }
+.dr-ayuda { line-height: 1.45; }
+.dr-preinforme { border-left: 4px solid var(--aviso, #c58a00); }
+.dr-preinforme h3 { margin: 0 0 4px; }
+.cat-maestro { margin-top: 14px; }
+.cat-maestro h3 { margin: 0 0 6px; }
+.cat-maestro .acciones { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.dr-tabla { min-width: 0; font-size: 0.78rem; }
+.dr-tabla th, .dr-tabla td { padding: 6px 5px; }
+.dr-tabla td:first-child { white-space: normal; min-width: 130px; }
+.dr-tabla td.num { min-width: 104px; }
+.dr-seccion td { background: #9fb0c8; color: #14305f; font-weight: 700; padding: 7px 8px; }
+.dr-calculo td { background: #fdf6e0; }
+.dr-clic { cursor: pointer; }
+.dr-pildora { display: inline-block; min-width: 30px; padding: 2px 8px; border-radius: 999px; background: #a9b9d1; color: #14305f; font-weight: 700; text-align: center; }
+.dr-obs-fila { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--borde); padding: 6px 0; }
+.dr-obs-fila input { width: 22px; height: 22px; flex: none; }
+.dr-obs-dato { display: flex; flex-direction: column; gap: 2px; text-align: left; flex: 1; color: var(--texto); background: none; border: 0; padding: 0; font-size: 0.95rem; }
+@media (prefers-color-scheme: dark) {
+  .dr-seccion td { background: #34465f; color: #dbe6f7; }
+  .dr-calculo td { background: #2c2a1d; }
+  .dr-pildora { background: #46597a; color: #e6eefb; }
+}
+
+.dr-lapiz { background: none; border: 0; color: var(--suave); font-size: 1rem; padding: 2px 4px 2px 8px; cursor: pointer; }
+.dr-lapiz.activo { color: var(--verde); font-weight: 800; }
+.dr-manual { font-style: italic; }
+.par-lupa { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.tabla-libro td, .tabla-libro th { white-space: nowrap; }
+.dr-aprobar textarea { width: 100%; margin: 10px 0; }
+.dr-aprobada { border-left: 4px solid var(--ok, #2e7d32); }
+.dr-aviso { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; border-bottom: 1px solid var(--borde); padding: 10px 0; }
+.dr-aviso.nuevo { background: rgba(46, 125, 50, 0.08); padding-left: 8px; }
+.dr-aviso-botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+.dr-aviso-fiscal { border-left: 4px solid var(--aviso, #c98a00); }
+input.drsal-in { width: 6.5rem; min-width: 0; padding: 6px 8px; text-align: right; }
+.tabla.drsal-ret { min-width: 0; }
+.tabla.drsal-ret td:first-child { min-width: 0; }
 /* FIN DEL ARCHIVO styles.css */

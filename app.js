@@ -12,6 +12,7 @@ import { vistaCierre } from './cierre.js';
 import { vistaPresupuesto } from './presupuesto.js';
 import { vistaImpuestos } from './fiscal.js';
 import { vistaRenta } from './dr.js';
+import { vistaDrAsalariados } from './drsal.js';
 import { vistaCartera } from './cartera.js';
 import { vistaActivos } from './activos.js';
 import { vistaConciliacion } from './conciliacion.js';
@@ -511,6 +512,7 @@ async function render() {
       else if (p[2] === 'cierre') await vistaCierre(id);
       else if (p[2] === 'presupuesto') await vistaPresupuesto(id);
       else if (p[2] === 'impuestos') await vistaImpuestos(id);
+      else if (p[2] === 'drsal') await vistaDrAsalariados(id);
       else if (p[2] === 'renta') await vistaRenta(id);
       else if (p[2] === 'cartera') await vistaCartera(id);
       else if (p[2] === 'activos') await vistaActivos(id);

@@ -2,6 +2,7 @@
 import { db, h, toast } from './lib.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import { leerFacturaXml } from './facturaxml.js';
+import { abrirEscanerQr } from './qr.js';
 
 const MAX_LADO = 1600;       // las fotos se reducen para enviarlas más rápido
 const MAX_PDF = 6 * 1024 * 1024;
@@ -141,6 +142,35 @@ export async function leerFactura(archivo, contexto) {
   return normalizarLectura(resp.datos);
 }
 
+// Pide a la función la factura que está detrás del QR de la DGI. Devuelve { xml } o { datos }.
+export async function leerQrServidor(url, contexto) {
+  const nombre = await ubicarFuncion();
+  const { data: sesion } = await db.auth.getSession();
+  const token = (sesion && sesion.session && sesion.session.access_token) || SUPABASE_ANON_KEY;
+  let r;
+  try {
+    r = await fetch(SUPABASE_URL + '/functions/v1/' + nombre, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ modo: 'qr', url, rol: contexto && contexto.rol, contribuyente: contexto && contexto.contribuyente })
+    });
+  } catch (_e) {
+    nombreFuncion = null;
+    throw new Error('se perdió la conexión con la función de lectura');
+  }
+  let resp = null;
+  try { resp = await r.json(); } catch (_e) { /* sin cuerpo */ }
+  if (!r.ok) {
+    const detalle = (resp && (resp.error || resp.message)) || '';
+    if (r.status === 400 && /Archivo no válido/.test(detalle)) throw new Error('la función ocr-factura está en una versión anterior: pega el código nuevo (ocr-factura.txt) en Supabase');
+    if (r.status === 401) throw new Error('la función rechazó el acceso (401): desactiva "Verify JWT" en sus ajustes');
+    throw new Error(detalle || 'error de la función (código ' + r.status + ')');
+  }
+  if (resp && resp.xml) return { xml: resp.xml };
+  if (resp && resp.datos) return { datos: resp.datos };
+  throw new Error((resp && resp.error) || 'la DGI no devolvió datos');
+}
+
 // Panel con los botones "Tomar foto" y "Elegir imagen o PDF"
 export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer, alArchivo }) {
   const estado = h('p', { class: 'ayuda' });
@@ -174,10 +204,12 @@ export function panelEscaneo({ obtenerContexto, obtenerEmpresa, alLeer, alArchiv
   const b3 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => xml.click() }, 'Importar factura electrónica (XML o PDF)');
   const b1 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => camara.click() }, 'Tomar foto');
   const b2 = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => galeria.click() }, 'Elegir imagen o PDF');
-  botones.push(b1, b2, b3);
+  const bq = h('button', { class: 'btn', type: 'button', onclick: () => abrirEscanerQr({ obtenerContexto, obtenerEmpresa, alLeer }) }, 'Escanear QR de la factura');
+  botones.push(b1, b2, b3, bq);
 
   return h('div', { class: 'grupo' },
     h('h3', null, 'Leer factura con IA'),
+    h('div', { class: 'acciones' }, bq),
     h('div', { class: 'acciones' }, b1, b2),
     h('div', { class: 'acciones' }, b3),
     camara, galeria, xml, estado,
