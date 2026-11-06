@@ -90,11 +90,13 @@ async function usaDetector() {
       const f = await window.BarcodeDetector.getSupportedFormats();
       if (f.includes('qr_code')) { detector = new window.BarcodeDetector({ formats: ['qr_code'] }); tieneDetector = true; }
     }
-  } catch (_e) { tieneDetector = false; }
+    diag.detector = tieneDetector ? 'sí' : ('BarcodeDetector' in window ? 'sin QR' : 'no existe');
+  } catch (_e) { tieneDetector = false; diag.detector = 'error'; }
   return tieneDetector;
 }
 
 let promesaJsQr = null;
+export const diag = { detector: '', jsqr: '' };
 function cargarJsQr() {
   if (window.jsQR) return Promise.resolve(window.jsQR);
   if (promesaJsQr) return promesaJsQr;
@@ -107,8 +109,9 @@ function cargarJsQr() {
         s.onload = () => res(!!window.jsQR); s.onerror = () => res(false);
         document.head.append(s);
       });
-      if (ok) return window.jsQR;
+      if (ok) { diag.jsqr = 'cargó'; return window.jsQR; }
     }
+    diag.jsqr = 'no cargó (sin internet o bloqueada)';
     promesaJsQr = null;
     return null;
   })();
@@ -197,8 +200,11 @@ export function abrirEscanerQr({ obtenerContexto, obtenerEmpresa, alLeer }) {
       video.srcObject = flujo;
       await video.play().catch(() => {});
       bucle();
-    } catch (_e) {
-      estado.textContent = 'No se pudo abrir la cámara. Permite el acceso a la cámara en el navegador, o usa "Elegir foto del QR".';
+    } catch (e) {
+      const n = e && e.name;
+      estado.textContent = (n === 'NotAllowedError' || n === 'SecurityError'
+        ? 'El navegador no tiene permiso para usar la cámara. Toca el candado junto a la dirección > Permisos > Cámara > Permitir, y vuelve a abrir el escáner.'
+        : `No se pudo abrir la cámara (${n || 'error'}).`) + ' Mientras tanto puedes pegar el enlace del QR abajo.';
     }
   }
 
@@ -210,7 +216,10 @@ export function abrirEscanerQr({ obtenerContexto, obtenerEmpresa, alLeer }) {
     try {
       const bmp = await createImageBitmap(f);
       const t = await decodificar(bmp, { intensivo: true });
-      if (!t) { estado.textContent = ''; toast('No encontré un código QR en esa imagen. Acércala al QR o usa la cámara.', 'error'); return; }
+      if (!t) {
+        estado.textContent = `No se leyó el QR en la imagen. Lector del navegador: ${diag.detector || 'sin probar'}; lector de respaldo: ${diag.jsqr || 'sin probar'}. Puedes pegar el enlace del QR abajo.`;
+        toast('No encontré un código QR en esa imagen.', 'error'); return;
+      }
       await procesar(t);
     } catch (_e) {
       estado.textContent = '';
@@ -218,12 +227,16 @@ export function abrirEscanerQr({ obtenerContexto, obtenerEmpresa, alLeer }) {
     }
   });
 
+  const pegado = h('textarea', { rows: '2', placeholder: 'https://dgi-fep.mef.gob.pa/Consultas/FacturasPorQR?chFE=…' });
   const cuerpo = h('div', { class: 'grupo' },
     video, estado,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn btn-sec', type: 'button', onclick: () => archivo.click() }, 'Elegir foto del QR'),
       h('button', { class: 'btn btn-sec', type: 'button', onclick: () => { parar(); cerrar(); } }, 'Cancelar')),
     archivo,
+    h('p', { class: 'ayuda' }, 'Si la cámara no lee el QR: léelo con la cámara del teléfono o con Google Lens, copia el enlace que sale y pégalo aquí.'),
+    pegado,
+    h('button', { class: 'btn btn-sec btn-bloque', type: 'button', onclick: () => { const t = pegado.value.trim(); if (!t) { toast('Pega primero el enlace o el CUFE.', 'error'); return; } procesar(t); } }, 'Usar el enlace pegado'),
     h('p', { class: 'ayuda' }, 'El QR da el RUC y DV del emisor, la fecha y el número; lo demás se trae de la DGI. Las cuentas y auxiliares los eliges tú. Revisa siempre antes de registrar.'));
   cerrar = modal('Escanear QR de la factura', cuerpo);
   // si cierran con la X o tocando fuera, se apaga la cámara
