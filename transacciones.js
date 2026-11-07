@@ -8,6 +8,7 @@ import { bloqueNotasCredito } from './notascredito.js';
 import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
 import { avisoRespaldo } from './respaldo.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux } from './auxiliares.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, enRangoCuenta, hayRangoCuentas, etiquetaCuentas, fechaDMA } from './rangos.js';
 import { abrirFacturasDgi, contarFacturasDgi, lecturaDeFila } from './facturasdgi.js';
 import { panelComentarios, pendientesAbiertos, contarPendientesEmpresa, abrirPendientes } from './comentarios.js';
 
@@ -31,6 +32,11 @@ function rangoMes(mes) {
   const [a, m] = mes.split('-').map(Number);
   const sig = m === 12 ? `${a + 1}-01` : `${a}-${pad(m + 1)}`;
   return [`${mes}-01`, `${sig}-01`];
+}
+function diaSiguiente(f) {
+  const [a, m, d] = f.split('-').map(Number);
+  const x = new Date(a, m - 1, d + 1);
+  return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
 }
 function moverMes(mes, delta) {
   const [a, m] = mes.split('-').map(Number);
@@ -66,6 +72,10 @@ export async function vistaTransacciones(id) {
   const miId = estado.userId || null;
 
   let mes = mesActual();
+  // Rango manual: fechas "desde - hasta" y cuentas "desde - hasta" (en vez del mes)
+  let rangoOn = false;
+  let fDesde = primerDiaMes(hoyISO()); let fHasta = ultimoDiaMes(hoyISO());
+  let cDesde = ''; let cHasta = '';
   let filas = [];
   let soloPendientes = false;   // ver las ventas que faltan por facturar en la DGI (todos los meses)
   let hayFiscal = true;         // false si aún no se ejecutó el archivo 62
@@ -81,7 +91,11 @@ export async function vistaTransacciones(id) {
   const selMes = h('input', { type: 'month', value: mes, required: true });
 
   async function cargarMes() {
-    const [d, s] = rangoMes(mes);
+    if (rangoOn) {
+      const pf = problemaFechas(fDesde, fHasta);
+      if (pf) { toast(pf, 'error'); return; }
+    }
+    const [d, s] = rangoOn ? [fDesde, diaSiguiente(fHasta)] : rangoMes(mes);
     const consulta = (cols) => {
       let q = db.from('transacciones').select(cols).eq('empresa_id', id);
       q = soloPendientes
@@ -101,6 +115,12 @@ export async function vistaTransacciones(id) {
     if (r.error) r = await consulta(base); // si aún no se ejecutó el archivo 53
     if (r.error) { toast(traducirError(r.error), 'error'); return; }
     filas = r.data;
+    // Rango de cuentas: se dejan las transacciones cuya cuenta principal o contrapartida está en el rango
+    // (las de varias cuentas se mantienen: su detalle está en el asiento)
+    if (hayRangoCuentas(cDesde, cHasta)) {
+      const num = (cid) => { const c = cuentas.find((x) => x.id === cid); return c ? c.numero : null; };
+      filas = filas.filter((t) => t.multilinea || [t.cuenta_principal_id, t.cuenta_contrapartida_id].some((cid) => cid && enRangoCuenta(num(cid), cDesde, cHasta)));
+    }
     selMes.value = mes;
     // Notas de crédito: las del mes (para los totales) y las de cada transacción (para la etiqueta)
     notasMes = []; notasPorTrx = {};
@@ -891,6 +911,27 @@ export async function vistaTransacciones(id) {
   const anterior = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, -1); cargarMes(); } }, '‹');
   const siguiente = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { mes = moverMes(mes, 1); cargarMes(); } }, '›');
 
+  // Rango manual de fechas y de cuentas
+  const panelRango = h('div', { class: 'tarjeta' });
+  const barraMes = h('div', { class: 'selector-mes' }, anterior, selMes, siguiente);
+  const btnRango = h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: () => { rangoOn = !rangoOn; armarRango(); cargarMes(); } }, 'Rango de fechas y cuentas');
+  function armarRango() {
+    btnRango.textContent = rangoOn ? '‹ Volver al mes' : 'Rango de fechas y cuentas';
+    barraMes.hidden = rangoOn;
+    panelRango.hidden = !rangoOn;
+    if (!rangoOn) return;
+    panelRango.replaceChildren(
+      h('h3', null, 'Rango de fechas'),
+      selectorFechas({ desde: fDesde, hasta: fHasta, alCambiar: (d, a) => { fDesde = d; fHasta = a; cargarMes(); } }),
+      h('h3', null, 'Rango de cuentas (opcional)'),
+      selectorCuentas({
+        cuentas: cuentas.slice().sort((x, y) => String(x.numero).localeCompare(String(y.numero), undefined, { numeric: true })),
+        desde: cDesde, hasta: cHasta, alCambiar: (d, a) => { cDesde = d; cHasta = a; cargarMes(); }
+      }),
+      h('p', { class: 'ayuda' }, 'Se muestran las transacciones del rango de fechas cuya cuenta principal o contrapartida está en el rango de cuentas. Las de varias cuentas siempre aparecen.'));
+  }
+  armarRango();
+
   const btnRec = h('button', {
     class: 'btn btn-sec btn-peq', type: 'button',
     onclick: () => abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar: cargarMes, auxDatos })
@@ -926,9 +967,10 @@ export async function vistaTransacciones(id) {
   mostrar(marcoEmpresa(empresa, 'transacciones', [
     avisoRespaldo(empresa),
     soloRegistra ? h('p', { class: 'ayuda' }, 'Con tu perfil de auxiliar ves todas las transacciones y los totales del mes; solo puedes corregir (editar, anular o eliminar) las que tú registraste.') : null,
-    h('div', { class: 'selector-mes' }, anterior, selMes, siguiente),
+    barraMes,
+    panelRango,
     resumen,
-    h('div', { class: 'acciones' }, btnDgi, btnComent, btnPend, btnRec),
+    h('div', { class: 'acciones' }, btnDgi, btnComent, btnPend, btnRec, btnRango),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))

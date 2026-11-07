@@ -3,6 +3,7 @@
 // Este archivo trae: carga de auxiliares, selector para los formularios, ventana para crear o
 // corregir un auxiliar, bloque del catálogo, informe de saldos y mayor de un auxiliar.
 import { db, h, toast, modal, campo, texto, dinero, fechaCorta, traducirError, redondear } from './lib.js';
+import { enRangoCuenta } from './rangos.js';
 import { confirmar } from './acciones.js';
 
 const n2 = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -172,7 +173,7 @@ export async function informeAuxiliares(ctx) {
     }
     throw r.error;
   }
-  const filas = r.data || [];
+  const filas = (r.data || []).filter((f) => enRangoCuenta(f.cuenta_numero, ctx.ctaDesde, ctx.ctaHasta));
   // Agrupar por cuenta
   const grupos = [];
   const porCuenta = new Map();

@@ -366,3 +366,6 @@ input.drsal-in { width: 6.5rem; min-width: 0; padding: 6px 8px; text-align: righ
 .tabla.drsal-ret { min-width: 0; }
 .tabla.drsal-ret td:first-child { min-width: 0; }
 /* FIN DEL ARCHIVO styles.css */
+.rango-fechas, .rango-cuentas { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
+.rango-campo { display: flex; flex-direction: column; gap: 2px; flex: 1 1 140px; min-width: 0; }
+/* FIN DEL ARCHIVO styles.css */

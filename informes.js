@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { exportarExcel, exportarPdf, compartirArchivoInforme } from './exportar.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, fechaDMA, enRangoCuenta, filtrarFilasCuentas, hayRangoCuentas, etiquetaCuentas } from './rangos.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux, formularioAuxiliar, informeAuxiliares, puedeCrearAux } from './auxiliares.js';
 
 const ORIGENES = {
@@ -213,24 +214,33 @@ export async function vistaInformes(id) {
   const est = {
     informe: 'diario', modo: 'mes', mes: hoy().slice(0, 7),
     anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues',
-    cuentaAux: '', verCeros: false, cuentaLibro: ''
+    cuentaAux: '', verCeros: false, cuentaLibro: '',
+    desde: primerDiaMes(hoy()), hasta: ultimoDiaMes(hoy()), ctaDesde: '', ctaHasta: ''
   };
+  // informes que aceptan rango de cuentas (el libro de ingresos y egresos ya tiene su propia lista de cajas y bancos)
+  const FILTRAN_CUENTAS = ['diario', 'mayor', 'balance', 'hoja', 'auxiliares'];
+  const filtraCuentas = () => FILTRAN_CUENTAS.includes(est.informe) && hayRangoCuentas(est.ctaDesde, est.ctaHasta);
   const barra = h('div', { class: 'filtros' });
   const zona = h('div');
 
   function rango() {
+    if (est.modo === 'rango') return [est.desde, est.hasta];
     if (est.modo === 'anio') return [`${est.anio}-01-01`, `${est.anio}-12-31`];
     const [a, m] = est.mes.split('-').map(Number);
     return [`${est.mes}-01`, `${est.mes}-${pad(new Date(a, m, 0).getDate())}`];
   }
-  const etiquetaPeriodo = () => (est.modo === 'anio'
-    ? `Año ${est.anio}`
-    : `Mes ${est.mes.split('-')[1]}/${est.mes.split('-')[0]}`);
+  const etiquetaFechas = () => (est.modo === 'rango'
+    ? `Del ${fechaDMA(est.desde)} al ${fechaDMA(est.hasta)}`
+    : est.modo === 'anio'
+      ? `Año ${est.anio}`
+      : `Mes ${est.mes.split('-')[1]}/${est.mes.split('-')[0]}`);
+  const etiquetaPeriodo = () => etiquetaFechas() + (filtraCuentas() ? ' · ' + etiquetaCuentas(est.ctaDesde, est.ctaHasta) : '');
 
   const ORIENTE = (o) => ORIGENES[o] || o;
   const nulo0 = (v) => (Number(v || 0) === 0 ? null : Number(v));
   const soloConsulta = empresa.rol === 'lector' || empresa.rol === 'auxiliar';
-  const archivoDe = (informe) => `${empresa.razon_social}-${informe}-${est.modo === 'anio' ? est.anio : est.mes}`;
+  const archivoDe = (informe) => `${empresa.razon_social}-${informe}-${est.modo === 'rango' ? `${est.desde}_a_${est.hasta}` : (est.modo === 'anio' ? est.anio : est.mes)}`
+    + (filtraCuentas() ? `-cuentas-${est.ctaDesde || 'inicio'}-a-${est.ctaHasta || 'fin'}` : '');
 
   /* ---- diario ---- */
   function accionesAsiento(a, ls) {
@@ -292,8 +302,12 @@ export async function vistaInformes(id) {
     const { data: datos, error } = r;
     if (error) throw error;
     // Siempre en orden cronológico: por fecha y, en la misma fecha, por número de asiento
-    const data = (datos || []).slice().sort((a, b) =>
+    let data = (datos || []).slice().sort((a, b) =>
       String(a.fecha).localeCompare(String(b.fecha)) || Number(a.consecutivo) - Number(b.consecutivo));
+    // Con rango de cuentas se muestran los asientos que tocan alguna cuenta del rango (completos, para que sigan cuadrados)
+    if (filtraCuentas()) {
+      data = data.filter((a) => (a.asiento_lineas || []).some((l) => l.cuentas && enRangoCuenta(l.cuentas.numero, est.ctaDesde, est.ctaHasta)));
+    }
     // Aviso si la numeración no sigue la fecha (se corrige con un botón para administrador y contador)
     let desorden = false;
     for (let i = 1; i < data.length; i++) if (Number(data[i].consecutivo) < Number(data[i - 1].consecutivo)) { desorden = true; break; }
@@ -346,7 +360,7 @@ export async function vistaInformes(id) {
           : h('p', { class: 'ayuda' }, 'Pídele al administrador o al contador que los ordene.')) : null,
       soloConsulta ? null : h('div', { class: 'acciones' },
         h('button', { class: 'btn', type: 'button', onclick: () => abrirAjuste(id, cuentas, rango()[1], pintar) }, '+ Asiento de ajuste')),
-      data.length ? tarjetas : h('p', { class: 'ayuda' }, 'No hay asientos en este período.'));
+      data.length ? tarjetas : h('p', { class: 'ayuda' }, filtraCuentas() ? 'No hay asientos con esas cuentas en este período.' : 'No hay asientos en este período.'));
     const spec = data.length ? {
       titulo: 'Diario general', subtitulo: etiquetaPeriodo(), hoja: 'Diario general',
       columnas: [{ t: 'Fecha', w: 1 }, { t: 'N.º', w: 0.7 }, { t: 'Cuenta', w: 2.6 }, { t: 'Descripción', w: 2.6 },
@@ -357,26 +371,24 @@ export async function vistaInformes(id) {
   }
 
   /* ---- mayor ---- */
-  async function mayor() {
-    if (!est.cuentaId) {
-      return { nodo: h('p', { class: 'ayuda' }, 'Elige una cuenta para ver su mayor. Aquí aparecen las cuentas que reciben movimientos.'), spec: null };
-    }
-    const [d, hasta] = rango();
+  // Mayor de una cuenta. En un rango de cuentas se omiten las que no tienen saldo ni movimientos.
+  async function mayorDeCuenta(cuenta, d, hasta, omitirVacias) {
     const { data, error } = await db.from('v_mayor')
       .select('fecha, consecutivo, descripcion, referencia, debito, credito, saldo')
-      .eq('empresa_id', id).eq('cuenta_id', est.cuentaId).lte('fecha', hasta)
+      .eq('empresa_id', id).eq('cuenta_id', cuenta.id).lte('fecha', hasta)
       .order('fecha').order('consecutivo').range(0, 4999);
     if (error) throw error;
-    const cuenta = cuentas.find((c) => c.id === est.cuentaId) || { numero: '', nombre: '' };
     // las cuentas de ingresos, costos y gastos empiezan en cero cada 1 de enero
     const nominal = /^[4-9]/.test(String(cuenta.numero));
     const antes = data.filter((m) => m.fecha < d && (!nominal || m.fecha.slice(0, 4) === d.slice(0, 4)));
     const saldoIni = antes.length ? Number(antes[antes.length - 1].saldo) : 0;
     const movs = data.filter((m) => m.fecha >= d);
+    if (omitirVacias && !movs.length && saldoIni === 0) return null;
     const td = movs.reduce((s, m) => s + Number(m.debito), 0);
     const tc = movs.reduce((s, m) => s + Number(m.credito), 0);
     const saldoFin = movs.length ? Number(movs[movs.length - 1].saldo) : saldoIni;
     const nodo = h('div', null,
+      omitirVacias ? h('h3', null, `${cuenta.numero} · ${cuenta.nombre}`) : null,
       h('div', { class: 'resumen' },
         chip('Saldo anterior', dinero(saldoIni)), chip('Saldo final', dinero(saldoFin)),
         chip('Débitos', dinero(td)), chip('Créditos', dinero(tc))),
@@ -391,14 +403,36 @@ export async function vistaInformes(id) {
             celda(nz(m.debito), 'num'), celda(nz(m.credito), 'num'), celda(n2(m.saldo), 'num'))))))
         : h('p', { class: 'ayuda' }, 'Esta cuenta no tiene movimientos en el período.'));
     const spec = {
-      titulo: `Mayor general · ${cuenta.numero} ${cuenta.nombre}`, subtitulo: etiquetaPeriodo(), hoja: 'Mayor general',
+      titulo: `Mayor general · ${cuenta.numero} ${cuenta.nombre}`, subtitulo: etiquetaFechas(), hoja: `Mayor ${cuenta.numero}`.slice(0, 31),
       columnas: [{ t: 'Fecha', w: 1 }, { t: 'Descripción', w: 4 }, { t: 'Débito', num: true }, { t: 'Crédito', num: true }, { t: 'Saldo', num: true }],
       filas: [
         { c: ['', 'Saldo anterior', null, null, redondear(saldoIni)], e: 'grupo' },
         ...movs.map((m) => ({ c: [fechaCorta(m.fecha), m.descripcion + (m.referencia ? ` · ${m.referencia}` : ''), nulo0(m.debito), nulo0(m.credito), Number(m.saldo)] })),
         { c: ['', 'Totales y saldo final', redondear(td), redondear(tc), redondear(saldoFin)], e: 'total' }]
     };
-    return { nodo, spec, archivo: archivoDe(`mayor-${cuenta.numero}`) };
+    return { nodo, spec, saldoIni, saldoFin, td, tc };
+  }
+
+  async function mayor() {
+    const [d, hasta] = rango();
+    if (filtraCuentas()) {
+      const lista = cuentas.filter((c) => enRangoCuenta(c.numero, est.ctaDesde, est.ctaHasta));
+      if (!lista.length) return { nodo: h('p', { class: 'ayuda' }, 'No hay cuentas en ese rango.'), spec: null };
+      if (lista.length > 80) throw new Error(`El rango tiene ${lista.length} cuentas. Acórtalo a 80 o menos para ver el mayor.`);
+      const partes = [];
+      for (const c of lista) { const r = await mayorDeCuenta(c, d, hasta, true); if (r) partes.push(r); }
+      if (!partes.length) return { nodo: h('p', { class: 'ayuda' }, 'Las cuentas de ese rango no tienen saldo ni movimientos en el período.'), spec: null };
+      return {
+        nodo: h('div', null, h('p', { class: 'ayuda' }, `Mayor de ${partes.length} cuenta(s) · ${etiquetaPeriodo()}`), ...partes.map((x) => x.nodo)),
+        spec: partes[0].spec, specs: partes.map((x) => x.spec), archivo: archivoDe('mayor')
+      };
+    }
+    if (!est.cuentaId) {
+      return { nodo: h('p', { class: 'ayuda' }, 'Elige una cuenta para ver su mayor, o un rango de cuentas "desde - hasta". Aquí aparecen las cuentas que reciben movimientos.'), spec: null };
+    }
+    const cuenta = cuentas.find((c) => c.id === est.cuentaId) || { id: est.cuentaId, numero: '', nombre: '' };
+    const r = await mayorDeCuenta(cuenta, d, hasta, false);
+    return { nodo: r.nodo, spec: r.spec, archivo: archivoDe(`mayor-${cuenta.numero}`) };
   }
 
   /* ---- balance de comprobación (antes y después de ajustes) ---- */
@@ -425,10 +459,15 @@ export async function vistaInformes(id) {
     return r.data;
   }
 
-  function construirBalance(modo, data) {
+  function construirBalance(modo, datos) {
     const maxNivel = Number(est.nivel);
+    const rangoC = filtraCuentas();
+    const data = rangoC ? filtrarFilasCuentas(datos, est.ctaDesde, est.ctaHasta) : datos;
     const filas = data.filter((r) => Number(r.nivel) <= maxNivel);
-    const raiz = data.filter((r) => Number(r.nivel) === 1);
+    // con rango de cuentas los totales suman las cuentas finales del rango; sin rango, las cuentas de nivel 1
+    const raiz = rangoC
+      ? data.filter((r) => !data.some((o) => o !== r && String(o.numero).startsWith(String(r.numero) + '.')))
+      : data.filter((r) => Number(r.nivel) === 1);
     const suma = (arr, k) => arr.reduce((s, r) => s + Number(r[k] || 0), 0);
     const sd = redondear(suma(raiz, 'saldo_final_deudor'));
     const sa = redondear(suma(raiz, 'saldo_final_acreedor'));
@@ -453,7 +492,7 @@ export async function vistaInformes(id) {
             celda(nz(r.saldo_final_deudor), 'num'), celda(nz(r.saldo_final_acreedor), 'num'))),
           ),
           h('tfoot', null, h('tr', null,
-            celda('Totales (nivel 1)'), celda(''),
+            celda(rangoC ? 'Totales de las cuentas del rango' : 'Totales (nivel 1)'), celda(''),
             celda(n2(suma(raiz, 'debitos')), 'num'), celda(n2(suma(raiz, 'creditos')), 'num'),
             celda(n2(sd), 'num'), celda(n2(sa), 'num')))))
         : h('p', { class: 'ayuda' }, 'No hay movimientos en el período.'));
@@ -472,7 +511,7 @@ export async function vistaInformes(id) {
             nulo0(r.saldo_final_deudor), nulo0(r.saldo_final_acreedor)],
           e: Number(r.nivel) === 1 ? 'n1' : (Number(r.nivel) === 2 ? 'n2' : 'normal')
         })),
-        { c: ['Totales (cuentas de nivel 1)', null, redondear(suma(raiz, 'debitos')), redondear(suma(raiz, 'creditos')), sd, sa], e: 'total' }],
+        { c: [rangoC ? 'Totales de las cuentas del rango' : 'Totales (cuentas de nivel 1)', null, redondear(suma(raiz, 'debitos')), redondear(suma(raiz, 'creditos')), sd, sa], e: 'total' }],
       notas: [notaVersion, 'Saldo anterior: positivo = deudor, negativo = acreedor. Los totales suman solo las cuentas de nivel 1 para no contar dos veces.']
     } : null;
     return { nodo, spec };
@@ -492,8 +531,9 @@ export async function vistaInformes(id) {
   /* ---- hoja de trabajo ---- */
   async function hoja() {
     const [d, hasta] = rango();
-    const { data, error } = await db.rpc('hoja_trabajo', { p_empresa: id, p_desde: d, p_hasta: hasta });
-    if (error) throw error;
+    const rh = await db.rpc('hoja_trabajo', { p_empresa: id, p_desde: d, p_hasta: hasta });
+    if (rh.error) throw rh.error;
+    const data = filtraCuentas() ? (rh.data || []).filter((r) => enRangoCuenta(r.numero, est.ctaDesde, est.ctaHasta)) : (rh.data || []);
     const claves = ['comp_debe', 'comp_haber', 'aj_debe', 'aj_haber', 'ajust_debe', 'ajust_haber', 'er_debe', 'er_haber', 'bg_debe', 'bg_haber'];
     const tot = {};
     claves.forEach((k) => { tot[k] = redondear(data.reduce((s, r) => s + Number(r[k] || 0), 0)); });
@@ -597,7 +637,7 @@ export async function vistaInformes(id) {
     if (auxDatos.falta) throw new Error('Falta ejecutar el archivo 77 en Supabase para usar auxiliares.');
     return informeAuxiliares({
       empresa, id, rango, etiquetaPeriodo, archivoDe, barraExportar,
-      cuentaId: est.cuentaAux, verCeros: est.verCeros,
+      cuentaId: est.cuentaAux, verCeros: est.verCeros, ctaDesde: est.ctaDesde, ctaHasta: est.ctaHasta,
       alCambiar: async () => { const r = await cargarAuxiliares(id); auxDatos.lista = r.lista; auxDatos.falta = r.falta; armarBarra(); pintar(); }
     });
   }
@@ -607,6 +647,7 @@ export async function vistaInformes(id) {
   async function pintar() {
     zona.replaceChildren(cargando());
     try {
+      if (est.modo === 'rango') { const pf = problemaFechas(est.desde, est.hasta); if (pf) throw new Error(pf); }
       const r = await construir[est.informe]();
       est.actual = r;
       zona.replaceChildren(
@@ -625,8 +666,10 @@ export async function vistaInformes(id) {
     const selInforme = h('select', { value: est.informe, onchange: (e) => { est.informe = e.target.value; armarBarra(); pintar(); } },
       INFORMES.map(([k, t]) => h('option', { value: k }, t)));
     const selModo = h('select', { value: est.modo, onchange: (e) => { est.modo = e.target.value; armarBarra(); pintar(); } },
-      h('option', { value: 'mes' }, 'Mensual'), h('option', { value: 'anio' }, 'Anual'));
-    const periodo = est.modo === 'anio'
+      h('option', { value: 'mes' }, 'Mensual'), h('option', { value: 'anio' }, 'Anual'), h('option', { value: 'rango' }, 'Rango de fechas'));
+    const periodo = est.modo === 'rango'
+      ? selectorFechas({ desde: est.desde, hasta: est.hasta, alCambiar: (d, a) => { est.desde = d; est.hasta = a; pintar(); } })
+      : est.modo === 'anio'
       ? h('input', {
         type: 'number', min: '2000', max: '2100', step: '1', inputmode: 'numeric', value: String(est.anio),
         onchange: (e) => { const v = Number(e.target.value); if (v >= 2000 && v <= 2100) { est.anio = v; pintar(); } }
@@ -669,6 +712,9 @@ export async function vistaInformes(id) {
       if (puedeCrearAux(empresa.rol) && !soloConsulta) {
         extra.push(h('button', { class: 'btn btn-sec btn-peq', type: 'button', onclick: nuevoAuxiliar }, '+ Nuevo auxiliar'));
       }
+    }
+    if (FILTRAN_CUENTAS.includes(est.informe)) {
+      extra.push(selectorCuentas({ cuentas, desde: est.ctaDesde, hasta: est.ctaHasta, alCambiar: (d, a) => { est.ctaDesde = d; est.ctaHasta = a; pintar(); } }));
     }
     barra.replaceChildren(selInforme, selModo, periodo, ...extra);
   }

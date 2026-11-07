@@ -6,6 +6,8 @@ import {
   marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { barraExportar } from './informes.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, hayRangoCuentas } from './rangos.js';
+import { estadoResultadosRango, balanceRango, subtituloRango } from './estadosrango.js';
 import { cargarCierreFiscal, tarjetaCierreFiscal, specCierreFiscal } from './cierrefiscal.js';
 
 const TIPOS = [
@@ -144,7 +146,10 @@ function specNotas(notas, detalles, anio) {
 export async function vistaEstados(id) {
   mostrar(marcoEmpresa({ id, razon_social: '…' }, 'estados', cargando()));
   const empresa = await cargarEmpresa(id);
-  const est = { anio: Number(hoy().slice(0, 4)), tipo: 'balance', actual: null };
+  const est = { anio: Number(hoy().slice(0, 4)), tipo: 'balance', actual: null, modo: 'anio',
+    desde: primerDiaMes(hoy()), hasta: ultimoDiaMes(hoy()), ctaDesde: '', ctaHasta: '', cuentas: null };
+  const admiteRango = () => est.tipo === 'balance' || est.tipo === 'resultados';
+  const enRango = () => est.modo === 'rango' && admiteRango();
   const barra = h('div', { class: 'filtros' });
   const zona = h('div');
 
@@ -358,6 +363,42 @@ export async function vistaEstados(id) {
       h('p', { class: 'ayuda' }, 'Son cifras del estado de resultados: no crean asientos. El seguro educativo y el impuesto se calculan sobre la utilidad de este estado. El balance y el libro mayor siguen con lo registrado; no registres además un ajuste al costo de ventas por la misma variación, porque se contaría dos veces.'));
   }
 
+  /* balance o resultados por rango de fechas y de cuentas */
+  async function construirRango() {
+    const tipo = est.tipo;
+    const prob = problemaFechas(est.desde, est.hasta);
+    if (prob) return { nodo: h('p', { class: 'ayuda' }, prob), spec: null };
+    const r = tipo === 'balance'
+      ? await balanceRango(id, est.hasta, est.ctaDesde, est.ctaHasta)
+      : await estadoResultadosRango(id, est.desde, est.hasta, est.ctaDesde, est.ctaHasta);
+    const sub = subtituloRango(tipo, est.desde, est.hasta, est.ctaDesde, est.ctaHasta);
+    const titulo = tipo === 'balance' ? 'Balance general' : 'Estado de resultados';
+    const hay = r.filas.some((f) => f.tipo === 'detalle');
+    const notas = tipo === 'balance'
+      ? 'Es el saldo de cada cuenta a la fecha "Hasta"; la fecha "Desde" no se usa. ' + (hayRangoCuentas(est.ctaDesde, est.ctaHasta)
+        ? 'Con rango de cuentas no se incluye la utilidad pendiente de cierre y los totales son solo de las cuentas elegidas.' : '')
+      : 'Muestra lo registrado en el período. No calcula el seguro educativo ni el impuesto sobre la renta del año ni el inventario inicial y final: esos solo salen en el estado anual.';
+    const tabla = h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla estado' },
+      h('thead', null, h('tr', null, h('th', null, 'Concepto'), h('th', { class: 'num' }, 'Monto'))),
+      h('tbody', null, r.filas.map((f) => (f.tipo === 'titulo'
+        ? h('tr', { class: 'fila-titulo' }, h('td', { colspan: 2 }, f.concepto))
+        : h('tr', { class: 'fila-' + f.tipo }, h('td', null, f.concepto), h('td', { class: 'num' }, n2(f.monto))))))));
+    const dif = r.diferencia;
+    const nodo = h('div', null,
+      h('p', { class: 'ayuda' }, `${titulo} · ${sub}`),
+      dif === null || dif === undefined ? null
+        : (dif === 0 ? h('p', { class: 'ayuda' }, 'Control: el balance cuadra.')
+          : h('div', { class: 'aviso-lectura' }, h('strong', null, 'El balance no cuadra a esa fecha.'), h('p', null, `Diferencia: ${n2(dif)}.`))),
+      hay ? tabla : h('p', { class: 'ayuda' }, 'No hay cifras en ese rango.'),
+      h('p', { class: 'ayuda' }, notas));
+    const spec = hay ? {
+      titulo, subtitulo: sub, hoja: tipo === 'balance' ? 'Balance general' : 'Estado de resultados',
+      columnas: [{ t: 'Concepto', w: 1 }, { t: 'Monto', num: true }],
+      filas: r.filas.map((f) => ({ c: f.tipo === 'titulo' ? [f.concepto, null] : [f.concepto, f.monto], e: estiloSpec(f.tipo) }))
+    } : null;
+    return { nodo, spec };
+  }
+
   async function construirEstado() {
     const rows = await cargarEstado(est.tipo);
     const tipo = est.tipo;
@@ -393,7 +434,7 @@ export async function vistaEstados(id) {
   async function pintar() {
     zona.replaceChildren(cargando());
     try {
-      const r = est.tipo === 'notas' ? await construirNotas() : await construirEstado();
+      const r = est.tipo === 'notas' ? await construirNotas() : (enRango() ? await construirRango() : await construirEstado());
       est.actual = r;
       zona.replaceChildren(
         h('div', { class: 'barra-exportar' },
@@ -401,7 +442,7 @@ export async function vistaEstados(id) {
             empresa,
             obtener: () => (est.actual && est.actual.spec
               ? { specs: [est.actual.spec].concat(est.actual.fiscal ? [specCierreFiscal(est.actual.fiscal, est.anio, empresa.razon_social)] : []),
-                archivo: `${empresa.razon_social}-${est.tipo}-${est.anio}` } : null)
+                archivo: enRango() ? `${empresa.razon_social}-${est.tipo}-${est.desde}-a-${est.hasta}` : `${empresa.razon_social}-${est.tipo}-${est.anio}` } : null)
           }),
           h('p', { class: 'ayuda' }, 'Paquete completo (los cuatro estados y las notas en un solo archivo):'),
           barraExportar({ empresa, obtener: paqueteCompleto, etiquetaExcel: 'Todo en Excel', etiquetaPdf: 'Todo en PDF' })),
@@ -412,19 +453,42 @@ export async function vistaEstados(id) {
     }
   }
 
-  function armarBarra() {
-    barra.replaceChildren(
-      h('select', { value: est.tipo, onchange: (e) => { est.tipo = e.target.value; pintar(); } },
-        TIPOS.map(([k, t]) => h('option', { value: k }, t))),
-      h('input', {
+  async function cargarCuentas() {
+    if (est.cuentas) return;
+    const { data } = await db.from('cuentas').select('numero, nombre').eq('empresa_id', id).eq('activa', true)
+      .order('numero').range(0, 1999);
+    est.cuentas = (data || []).slice().sort((a, b) => a.numero.localeCompare(b.numero, 'en', { numeric: true }));
+  }
+
+  async function armarBarra() {
+    if (enRango()) await cargarCuentas();
+    const selTipo = h('select', { onchange: (e) => { est.tipo = e.target.value; armarBarra(); pintar(); } },
+      TIPOS.map(([k, t]) => h('option', { value: k }, t)));
+    selTipo.value = est.tipo;
+    const items = [selTipo];
+    if (admiteRango()) {
+      const selModo = h('select', { 'aria-label': 'Período', onchange: (e) => { est.modo = e.target.value; armarBarra(); pintar(); } },
+        h('option', { value: 'anio' }, 'Año completo (comparativo)'),
+        h('option', { value: 'rango' }, 'Rango de fechas y cuentas'));
+      selModo.value = est.modo;
+      items.push(selModo);
+    }
+    if (enRango()) {
+      items.push(selectorFechas({ desde: est.desde, hasta: est.hasta, alCambiar: (d, a) => { est.desde = d; est.hasta = a; pintar(); } }));
+      items.push(selectorCuentas({ cuentas: est.cuentas || [], desde: est.ctaDesde, hasta: est.ctaHasta,
+        alCambiar: (d, a) => { est.ctaDesde = d; est.ctaHasta = a; pintar(); } }));
+    } else {
+      items.push(h('input', {
         type: 'number', min: '2000', max: '2100', step: '1', inputmode: 'numeric', value: String(est.anio),
         onchange: (e) => { const v = Number(e.target.value); if (v >= 2000 && v <= 2100) { est.anio = v; pintar(); } }
       }));
+    }
+    barra.replaceChildren(...items);
   }
 
   armarBarra();
   mostrar(marcoEmpresa(empresa, 'estados', [
-    h('p', { class: 'ayuda' }, 'Año del estado (el comparativo es el año anterior). Si todavía no cerraste el año, la utilidad del ejercicio aparece como "pendiente de cierre".'),
+    h('p', { class: 'ayuda' }, 'Año del estado (el comparativo es el año anterior). El balance y el estado de resultados también se pueden ver por rango de fechas y de cuentas; los demás estados son anuales. Si todavía no cerraste el año, la utilidad del ejercicio aparece como "pendiente de cierre".'),
     barra, zona]));
   pintar();
 }
