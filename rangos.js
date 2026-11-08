@@ -1,5 +1,5 @@
 // Rangos "desde - hasta" que usan los informes y las listas: de fechas y de cuentas.
-import { h, toast } from './lib.js';
+import { db, h, toast } from './lib.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 export const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -97,6 +97,26 @@ export function selectorCuentas({ cuentas, desde, hasta, alCambiar }) {
   return h('div', { class: 'rango-cuentas' },
     h('label', { class: 'rango-campo' }, h('span', { class: 'ayuda' }, 'Cuenta desde'), d),
     h('label', { class: 'rango-campo' }, h('span', { class: 'ayuda' }, 'Cuenta hasta'), a));
+}
+
+// Ids de las cuentas que tienen al menos una línea en el diario (toda la historia de la empresa)
+export async function idsConMovimiento(empresaId) {
+  const ids = new Set();
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await db.from('asiento_lineas').select('cuenta_id')
+      .eq('empresa_id', empresaId).range(desde, desde + 999);
+    if (error) throw error;
+    (data || []).forEach((x) => ids.add(x.cuenta_id));
+    if (!data || data.length < 1000) break;
+  }
+  return ids;
+}
+
+// Deja solo las cuentas con movimiento. Una cuenta madre se conserva si alguna subcuenta tiene movimiento.
+export function soloConMovimiento(cuentas, ids) {
+  const con = cuentas.filter((c) => ids.has(c.id));
+  const numeros = con.map((c) => String(c.numero));
+  return cuentas.filter((c) => ids.has(c.id) || numeros.some((n) => n.startsWith(String(c.numero) + '.')));
 }
 
 // FIN DEL ARCHIVO rangos.js

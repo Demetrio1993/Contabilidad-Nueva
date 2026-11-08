@@ -6,7 +6,7 @@ import {
 } from './lib.js';
 import { exportarExcel, exportarPdf, compartirArchivoInforme } from './exportar.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
-import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, fechaDMA, enRangoCuenta, filtrarFilasCuentas, hayRangoCuentas, etiquetaCuentas } from './rangos.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, fechaDMA, enRangoCuenta, filtrarFilasCuentas, hayRangoCuentas, etiquetaCuentas, idsConMovimiento, soloConMovimiento } from './rangos.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux, formularioAuxiliar, informeAuxiliares, puedeCrearAux } from './auxiliares.js';
 
 const ORIGENES = {
@@ -211,6 +211,8 @@ export async function vistaInformes(id) {
   if (errC) throw errC;
 
   const auxDatos = await cargarAuxiliares(id);
+  // En las listas de cuentas solo se presentan las que tienen movimientos
+  const cuentasMov = soloConMovimiento(cuentas, await idsConMovimiento(id));
   const est = {
     informe: 'diario', modo: 'mes', mes: hoy().slice(0, 7),
     anio: Number(hoy().slice(0, 4)), cuentaId: '', nivel: '4', version: 'despues',
@@ -371,7 +373,7 @@ export async function vistaInformes(id) {
   }
 
   /* ---- mayor ---- */
-  // Mayor de una cuenta. En un rango de cuentas se omiten las que no tienen saldo ni movimientos.
+  // Mayor de una cuenta. En un rango de cuentas se omiten las que no tienen saldo anterior ni movimientos.
   async function mayorDeCuenta(cuenta, d, hasta, omitirVacias) {
     const { data, error } = await db.from('v_mayor')
       .select('fecha, consecutivo, descripcion, referencia, debito, credito, saldo')
@@ -413,22 +415,41 @@ export async function vistaInformes(id) {
     return { nodo, spec, saldoIni, saldoFin, td, tc };
   }
 
+  // Ids de las cuentas con líneas en el diario hasta la fecha "hasta": incluye las del asiento de apertura
+  // (saldo inicial) y las que traen saldo de períodos anteriores, aunque no se hayan movido entre d y hasta
+  async function cuentasConMovimiento(d, hasta) {
+    const ids = new Set();
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await db.from('asiento_lineas')
+        .select('cuenta_id, asientos!inner(fecha)')
+        .eq('empresa_id', id).lte('asientos.fecha', hasta)
+        .range(desde, desde + 999);
+      if (error) throw error;
+      (data || []).forEach((x) => ids.add(x.cuenta_id));
+      if (!data || data.length < 1000) break;
+    }
+    return ids;
+  }
+
   async function mayor() {
     const [d, hasta] = rango();
-    if (filtraCuentas()) {
-      const lista = cuentas.filter((c) => enRangoCuenta(c.numero, est.ctaDesde, est.ctaHasta));
-      if (!lista.length) return { nodo: h('p', { class: 'ayuda' }, 'No hay cuentas en ese rango.'), spec: null };
-      if (lista.length > 80) throw new Error(`El rango tiene ${lista.length} cuentas. Acórtalo a 80 o menos para ver el mayor.`);
+    if (filtraCuentas() || !est.cuentaId) {
+      const base = filtraCuentas() ? cuentas.filter((c) => enRangoCuenta(c.numero, est.ctaDesde, est.ctaHasta)) : cuentas;
+      if (!base.length) return { nodo: h('p', { class: 'ayuda' }, 'No hay cuentas en ese rango.'), spec: null };
+      const con = await cuentasConMovimiento(d, hasta);
+      const lista = base.filter((c) => con.has(c.id));
+      if (!lista.length) return { nodo: h('p', { class: 'ayuda' }, 'Ninguna cuenta tiene saldo ni movimientos en ese período.'), spec: null };
+      if (lista.length > 150) throw new Error(`Hay ${lista.length} cuentas con movimientos. Acorta el rango de cuentas o de fechas a 150 cuentas o menos.`);
       const partes = [];
-      for (const c of lista) { const r = await mayorDeCuenta(c, d, hasta, true); if (r) partes.push(r); }
-      if (!partes.length) return { nodo: h('p', { class: 'ayuda' }, 'Las cuentas de ese rango no tienen saldo ni movimientos en el período.'), spec: null };
+      for (let i = 0; i < lista.length; i += 10) {
+        const lote = await Promise.all(lista.slice(i, i + 10).map((c) => mayorDeCuenta(c, d, hasta, true)));
+        lote.forEach((r) => { if (r) partes.push(r); });
+      }
+      if (!partes.length) return { nodo: h('p', { class: 'ayuda' }, 'Ninguna cuenta tiene saldo ni movimientos en ese período.'), spec: null };
       return {
-        nodo: h('div', null, h('p', { class: 'ayuda' }, `Mayor de ${partes.length} cuenta(s) · ${etiquetaPeriodo()}`), ...partes.map((x) => x.nodo)),
+        nodo: h('div', null, h('p', { class: 'ayuda' }, `Cuentas con saldo o movimientos: ${partes.length} · ${etiquetaPeriodo()}`), ...partes.map((x) => x.nodo)),
         spec: partes[0].spec, specs: partes.map((x) => x.spec), archivo: archivoDe('mayor')
       };
-    }
-    if (!est.cuentaId) {
-      return { nodo: h('p', { class: 'ayuda' }, 'Elige una cuenta para ver su mayor, o un rango de cuentas "desde - hasta". Aquí aparecen las cuentas que reciben movimientos.'), spec: null };
     }
     const cuenta = cuentas.find((c) => c.id === est.cuentaId) || { id: est.cuentaId, numero: '', nombre: '' };
     const r = await mayorDeCuenta(cuenta, d, hasta, false);
@@ -682,7 +703,7 @@ export async function vistaInformes(id) {
     if (est.informe === 'mayor') {
       extra.push(h('select', { value: est.cuentaId, onchange: (e) => { est.cuentaId = e.target.value; pintar(); } },
         h('option', { value: '' }, 'Elegir cuenta…'),
-        cuentas.map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))));
+        cuentasMov.map((c) => h('option', { value: c.id }, `${c.numero} · ${c.nombre}`))));
     }
     if (est.informe === 'balance') {
       extra.push(h('select', { value: est.version, onchange: (e) => { est.version = e.target.value; pintar(); } },
@@ -714,7 +735,7 @@ export async function vistaInformes(id) {
       }
     }
     if (FILTRAN_CUENTAS.includes(est.informe)) {
-      extra.push(selectorCuentas({ cuentas, desde: est.ctaDesde, hasta: est.ctaHasta, alCambiar: (d, a) => { est.ctaDesde = d; est.ctaHasta = a; pintar(); } }));
+      extra.push(selectorCuentas({ cuentas: cuentasMov, desde: est.ctaDesde, hasta: est.ctaHasta, alCambiar: (d, a) => { est.ctaDesde = d; est.ctaHasta = a; pintar(); } }));
     }
     barra.replaceChildren(selInforme, selModo, periodo, ...extra);
   }

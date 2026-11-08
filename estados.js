@@ -6,7 +6,7 @@ import {
   marcoEmpresa, cargarEmpresa, hoy, redondear
 } from './lib.js';
 import { barraExportar } from './informes.js';
-import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, hayRangoCuentas } from './rangos.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, hayRangoCuentas, idsConMovimiento, soloConMovimiento } from './rangos.js';
 import { estadoResultadosRango, balanceRango, subtituloRango } from './estadosrango.js';
 import { cargarCierreFiscal, tarjetaCierreFiscal, specCierreFiscal } from './cierrefiscal.js';
 
@@ -455,9 +455,10 @@ export async function vistaEstados(id) {
 
   async function cargarCuentas() {
     if (est.cuentas) return;
-    const { data } = await db.from('cuentas').select('numero, nombre').eq('empresa_id', id).eq('activa', true)
-      .order('numero').range(0, 1999);
-    est.cuentas = (data || []).slice().sort((a, b) => a.numero.localeCompare(b.numero, 'en', { numeric: true }));
+    const { data } = await db.from('cuentas').select('id, numero, nombre').eq('empresa_id', id).eq('activa', true)
+      .order('numero').range(0, 4999);
+    const con = soloConMovimiento(data || [], await idsConMovimiento(id));
+    est.cuentas = con.slice().sort((a, b) => a.numero.localeCompare(b.numero, 'en', { numeric: true }));
   }
 
   async function armarBarra() {

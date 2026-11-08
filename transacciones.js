@@ -8,7 +8,7 @@ import { bloqueNotasCredito } from './notascredito.js';
 import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
 import { avisoRespaldo } from './respaldo.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux } from './auxiliares.js';
-import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, enRangoCuenta, hayRangoCuentas, etiquetaCuentas, fechaDMA } from './rangos.js';
+import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, enRangoCuenta, hayRangoCuentas, etiquetaCuentas, fechaDMA, idsConMovimiento, soloConMovimiento } from './rangos.js';
 import { abrirFacturasDgi, contarFacturasDgi, lecturaDeFila } from './facturasdgi.js';
 import { panelComentarios, pendientesAbiertos, contarPendientesEmpresa, abrirPendientes } from './comentarios.js';
 
@@ -925,11 +925,12 @@ export async function vistaTransacciones(id) {
       selectorFechas({ desde: fDesde, hasta: fHasta, alCambiar: (d, a) => { fDesde = d; fHasta = a; cargarMes(); } }),
       h('h3', null, 'Rango de cuentas (opcional)'),
       selectorCuentas({
-        cuentas: cuentas.slice().sort((x, y) => String(x.numero).localeCompare(String(y.numero), undefined, { numeric: true })),
+        cuentas: soloConMovimiento(cuentas, idsMov).sort((x, y) => String(x.numero).localeCompare(String(y.numero), undefined, { numeric: true })),
         desde: cDesde, hasta: cHasta, alCambiar: (d, a) => { cDesde = d; cHasta = a; cargarMes(); }
       }),
       h('p', { class: 'ayuda' }, 'Se muestran las transacciones del rango de fechas cuya cuenta principal o contrapartida está en el rango de cuentas. Las de varias cuentas siempre aparecen.'));
   }
+  const idsMov = await idsConMovimiento(id);
   armarRango();
 
   const btnRec = h('button', {
