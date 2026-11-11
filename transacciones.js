@@ -5,7 +5,7 @@ import { panelEscaneo } from './ocr.js';
 import { confirmar, pedirMotivo, barraAcciones, rpcOk } from './acciones.js';
 import { panelSoportes, subirSoporte } from './soportes.js';
 import { bloqueNotasCredito } from './notascredito.js';
-import { abrirRecurrentes, contarPendientes } from './recurrentes.js';
+import { abrirRecurrentes, abrirPlantillaMes, contarPendientes } from './recurrentes.js';
 import { avisoRespaldo } from './respaldo.js';
 import { cargarAuxiliares, campoAuxiliar, etiquetaAux } from './auxiliares.js';
 import { selectorFechas, selectorCuentas, problemaFechas, primerDiaMes, ultimoDiaMes, enRangoCuenta, hayRangoCuentas, etiquetaCuentas, fechaDMA, idsConMovimiento, soloConMovimiento } from './rangos.js';
@@ -144,6 +144,8 @@ export async function vistaTransacciones(id) {
   function pintar() {
     btnComent.textContent = pendTotal ? `Pendientes (${pendTotal})` : 'Pendientes';
     btnDgi.textContent = dgiPend ? `Facturas de la DGI (${dgiPend} por revisar)` : 'Facturas de la DGI';
+    btnPlantilla.textContent = recurrentesPend ? `⏰ Cargar plantilla del mes (${recurrentesPend})` : 'Cargar plantilla del mes';
+    btnPlantilla.className = recurrentesPend ? 'btn btn-peq' : 'btn btn-sec btn-peq';
     btnRec.textContent = recurrentesPend ? `⏰ Movimientos recurrentes (${recurrentesPend} por registrar)` : 'Movimientos recurrentes';
     const suma = (tipos, campoN) => filas.filter((t) => !t.anulada && tipos.includes(t.tipo))
       .reduce((s, t) => s + Number(t[campoN]), 0);
@@ -933,6 +935,10 @@ export async function vistaTransacciones(id) {
   const idsMov = await idsConMovimiento(id);
   armarRango();
 
+  const btnPlantilla = h('button', {
+    class: 'btn btn-sec btn-peq', type: 'button',
+    onclick: () => abrirPlantillaMes({ empresa, terceros, alCambiar: cargarMes })
+  }, 'Cargar plantilla del mes');
   const btnRec = h('button', {
     class: 'btn btn-sec btn-peq', type: 'button',
     onclick: () => abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar: cargarMes, auxDatos })
@@ -971,7 +977,7 @@ export async function vistaTransacciones(id) {
     barraMes,
     panelRango,
     resumen,
-    h('div', { class: 'acciones' }, btnDgi, btnComent, btnPend, btnRec, btnRango),
+    h('div', { class: 'acciones' }, empresa.rol === 'lector' ? null : btnPlantilla, btnDgi, btnComent, btnPend, btnRec, btnRango),
     lista,
     h('div', { class: 'acciones' },
       h('button', { class: 'btn', type: 'button', onclick: () => abrirNueva() }, '+ Nueva transacción'))

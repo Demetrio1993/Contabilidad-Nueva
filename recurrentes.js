@@ -3,6 +3,7 @@
 import { db, h, toast, modal, campo, texto, dinero, fechaCorta, hoy, traducirError } from './lib.js';
 import { confirmar, barraAcciones, rpcOk } from './acciones.js';
 import { campoAuxiliar } from './auxiliares.js';
+import { ultimoDiaMes, ISO } from './rangos.js';
 
 const TIPOS = {
   venta: 'Venta', compra_mercancia: 'Compra de mercancía', costo: 'Costo', gasto: 'Gasto',
@@ -140,6 +141,142 @@ function registrarAhora(r, empresa, alRegistrar) {
   h('button', { class: 'btn btn-bloque', type: 'submit' }, 'Registrar')));
 }
 
+
+/* ---------------------- Cargar la plantilla del mes (en lote) ---------------------- */
+const ORDEN_TIPO = ['venta', 'cobro_cliente', 'otro', 'compra_mercancia', 'costo', 'gasto', 'pago_proveedor'];
+
+// Muestra todo lo que toca registrar en un mes, con fecha, documento y monto editables, y lo registra de una vez.
+export function abrirPlantillaMes({ empresa, terceros, alCambiar }) {
+  const nombreTercero = new Map((terceros || []).map((t) => [t.id, t.razon_social]));
+  const mesInicial = hoy().slice(0, 7);
+  const cuerpo = h('div', null, h('p', { class: 'ayuda' }, 'Cargando…'));
+  const selMes = h('input', { type: 'month', value: mesInicial, 'aria-label': 'Mes de la plantilla' });
+  const zona = h('div');
+  let filas = []; // { x, marca, fecha, numero, monto, fijar, nodo }
+  let ocupado = false;
+  let cerrar;
+
+  const mon = (v) => Number(v || 0);
+  const itbmsDe = (f) => {
+    const base = mon(f.x.monto_bruto);
+    const m = mon(f.monto.value);
+    return base > 0 ? Math.round(mon(f.x.itbms) * m / base * 100) / 100 : 0;
+  };
+
+  async function cargar() {
+    zona.replaceChildren(h('p', { class: 'ayuda' }, 'Cargando…'));
+    const limite = ultimoDiaMes(`${selMes.value || mesInicial}-01`);
+    const r = await db.from('recurrentes').select('*').eq('empresa_id', empresa.id).eq('activa', true)
+      .lte('proxima', limite).order('proxima');
+    if (r.error) { zona.replaceChildren(h('p', { class: 'ayuda' }, 'Falta ejecutar el archivo 66 en Supabase.')); return; }
+    const lista = (r.data || []).slice().sort((a, b) => (ORDEN_TIPO.indexOf(a.tipo) - ORDEN_TIPO.indexOf(b.tipo))
+      || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+    const inicioMes = `${selMes.value || mesInicial}-01`;
+    filas = lista.map((x) => {
+      const f = {
+        x,
+        marca: h('input', { type: 'checkbox', checked: true, 'aria-label': `Registrar ${x.nombre}` }),
+        fecha: h('input', { type: 'date', value: x.proxima }),
+        numero: h('input', { type: 'text', placeholder: 'Opcional' }),
+        monto: h('input', { type: 'number', step: '0.01', min: '0.01', inputmode: 'decimal', value: Number(x.monto_bruto).toFixed(2) }),
+        fijar: h('input', { type: 'checkbox' })
+      };
+      const avisoFijar = h('label', { class: 'fila-check' }, f.fijar, h('span', { class: 'ayuda' }, 'Dejar este monto en la plantilla desde ahora'));
+      avisoFijar.hidden = true;
+      const lineaItbms = h('span', { class: 'ayuda' });
+      const refrescarFila = () => {
+        const cambio = mon(f.monto.value) !== mon(x.monto_bruto);
+        avisoFijar.hidden = !cambio;
+        if (!cambio) f.fijar.checked = false;
+        const it = itbmsDe(f);
+        lineaItbms.textContent = it > 0 ? `ITBMS ${dinero(it)}` : '';
+        totales();
+      };
+      f.monto.addEventListener('input', refrescarFila);
+      f.marca.addEventListener('change', totales);
+      refrescarFila();
+      const quien = x.tercero_id ? nombreTercero.get(x.tercero_id) : null;
+      f.nodo = h('div', { class: 'tarjeta' },
+        h('label', { class: 'fila-check' }, f.marca, h('strong', null, x.nombre)),
+        h('p', { class: 'ayuda' }, `${TIPOS[x.tipo]}${quien ? ' · ' + quien : ''}${x.forma === 'credito' ? ' · a crédito' : ''}`,
+          x.proxima < inicioMes ? h('span', { class: 'insignia aviso' }, 'Atrasado') : null),
+        campo('Fecha', f.fecha), campo('Número de factura o documento', f.numero),
+        campo(empresa.contribuyente_itbms && FACTURAS.includes(x.tipo) ? 'Monto sin ITBMS' : 'Monto', f.monto),
+        lineaItbms, avisoFijar);
+      return f;
+    });
+    pintarLista();
+  }
+
+  const resumen = h('p', { class: 'ayuda' });
+  const btnRegistrar = h('button', { class: 'btn btn-bloque', type: 'button' }, 'Registrar lo seleccionado');
+  function totales() {
+    const sel = filas.filter((f) => f.marca.checked);
+    const suma = sel.reduce((s, f) => s + mon(f.monto.value), 0);
+    resumen.textContent = filas.length
+      ? `${sel.length} de ${filas.length} seleccionados · total ${dinero(suma)}${empresa.contribuyente_itbms ? ' (sin ITBMS)' : ''}`
+      : '';
+    btnRegistrar.textContent = sel.length ? `Registrar ${sel.length} seleccionado${sel.length === 1 ? '' : 's'}` : 'Registrar lo seleccionado';
+    btnRegistrar.disabled = !sel.length || ocupado;
+  }
+
+  function pintarLista() {
+    if (!filas.length) {
+      zona.replaceChildren(h('p', { class: 'ayuda' }, 'No hay nada por registrar hasta este mes. Crea las plantillas en "Movimientos recurrentes" (cuotas de clientes, alquiler, etc.).'));
+      return;
+    }
+    const todos = h('button', { class: 'btn btn-sec btn-peq', type: 'button',
+      onclick: () => { const v = !filas.every((f) => f.marca.checked); filas.forEach((f) => { f.marca.checked = v; }); totales(); } }, 'Marcar o desmarcar todos');
+    zona.replaceChildren(
+      h('div', { class: 'acciones' }, todos), resumen, ...filas.map((f) => f.nodo), btnRegistrar,
+      h('p', { class: 'ayuda' }, 'Cada uno se registra con su asiento, igual que si lo hicieras uno por uno. Si cambias un monto solo vale para este mes, salvo que marques "Dejar este monto en la plantilla". Lo que no marques sigue pendiente.'));
+    totales();
+  }
+
+  btnRegistrar.addEventListener('click', async () => {
+    if (ocupado) return;
+    const sel = filas.filter((f) => f.marca.checked);
+    for (const f of sel) {
+      if (!ISO.test(f.fecha.value)) { toast(`Revisa la fecha de "${f.x.nombre}".`, 'error'); return; }
+      if (!(mon(f.monto.value) > 0)) { toast(`Revisa el monto de "${f.x.nombre}".`, 'error'); return; }
+    }
+    ocupado = true; totales();
+    let bien = 0; const fallas = [];
+    for (const f of sel) {
+      btnRegistrar.textContent = `Registrando ${bien + fallas.length + 1} de ${sel.length}…`;
+      try {
+        const cambio = mon(f.monto.value) !== mon(f.x.monto_bruto);
+        if (cambio && f.fijar.checked) {
+          await rpcOk(db, 'guardar_recurrente', {
+            p_id: f.x.id, p_empresa: empresa.id, p_nombre: f.x.nombre, p_tipo: f.x.tipo, p_tercero: f.x.tercero_id,
+            p_descripcion: f.x.descripcion, p_monto: mon(f.monto.value), p_itbms: itbmsDe(f),
+            p_retencion: f.x.monto_bruto > 0 ? Math.round(mon(f.x.retencion) * mon(f.monto.value) / mon(f.x.monto_bruto) * 100) / 100 : 0,
+            p_forma: f.x.forma, p_cuenta_principal: f.x.cuenta_principal_id, p_cuenta_contrapartida: f.x.cuenta_contrapartida_id,
+            p_dia: f.x.dia, p_proxima: f.x.proxima
+          });
+        }
+        await rpcOk(db, 'registrar_recurrente', {
+          p_id: f.x.id, p_fecha: f.fecha.value, p_numero: texto(f.numero.value),
+          p_monto: cambio && !f.fijar.checked ? mon(f.monto.value) : null, p_itbms: null
+        });
+        bien++;
+      } catch (err) { fallas.push(`${f.x.nombre}: ${traducirError(err)}`); }
+    }
+    ocupado = false;
+    if (bien) { toast(`Se registraron ${bien} movimiento${bien === 1 ? '' : 's'} con su asiento.`, 'ok'); alCambiar && alCambiar(); }
+    if (fallas.length) toast(`No se pudo registrar: ${fallas.join(' · ')}`, 'error');
+    await cargar();
+  });
+
+  selMes.addEventListener('change', () => { if (selMes.value) cargar(); });
+  cuerpo.replaceChildren(
+    h('p', { class: 'ayuda' }, 'Elige el mes y marca lo que quieres registrar. Aparece todo lo que toca hasta el final de ese mes, incluidos los atrasados.'),
+    campo('Mes', selMes), zona);
+  cerrar = modal('Cargar plantilla del mes', cuerpo);
+  cargar();
+  return cerrar;
+}
+
 export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar, auxDatos }) {
   const cuerpo = h('div', null, h('p', { class: 'ayuda' }, 'Cargando…'));
   let cerrar;
@@ -151,7 +288,9 @@ export function abrirRecurrentes({ empresa, cuentas, terceros, clave, alCambiar,
     const lista = r.data || [];
     const hoyISO = hoy();
     cuerpo.replaceChildren(
-      h('p', { class: 'ayuda' }, 'Guarda lo que se repite cada mes. Cuando llegue la fecha te aparece aquí para confirmarlo; nada se registra solo.'),
+      h('p', { class: 'ayuda' }, 'Guarda lo que se repite cada mes. Cuando llegue la fecha te aparece aquí para confirmarlo; nada se registra solo. Para cargar todo el mes de una vez usa "Cargar plantilla del mes".'),
+      lista.some((x) => x.activa) ? h('div', { class: 'acciones' },
+        h('button', { class: 'btn', type: 'button', onclick: () => abrirPlantillaMes({ empresa, terceros, alCambiar: refrescar }) }, 'Cargar plantilla del mes')) : null,
       !lista.length ? h('p', { class: 'ayuda' }, 'Todavía no hay movimientos recurrentes.') : null,
       ...lista.map((x) => {
         const toca = x.activa && x.proxima <= hoyISO;
