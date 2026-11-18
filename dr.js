@@ -16,7 +16,7 @@ const TITULO_FORM = 'DECLARACIÓN JURADA DE RENTAS PERSONAS NATURALES, ASALARIAD
 const TITULO_VERSION = 'Formulario 1 V: 8 NATURAL';
 const TIPOS = {
   activo: 'Activo', pasivo: 'Pasivo', patrimonio: 'Patrimonio', ingreso: 'Ingreso',
-  costo: 'Costo', gasto: 'Gasto', extraordinario: 'Extraordinario'
+  costo: 'Costo', gasto: 'Gasto', extraordinario: 'Otros egresos'
 };
 
 // Especificaciones para Excel y PDF

@@ -13,7 +13,7 @@ const GRUPOS_RES = [
   ['gastos_operativos', 'GASTOS OPERATIVOS', 'Total gastos operativos'],
   ['otros_ingresos', 'OTROS INGRESOS', 'Total otros ingresos'],
   ['gastos_financieros', 'GASTOS FINANCIEROS', 'Total gastos financieros'],
-  ['extraordinarios', 'GASTOS Y EGRESOS EXTRAORDINARIOS', 'Total extraordinarios'],
+  ['extraordinarios', 'OTROS EGRESOS', 'Total otros egresos'],
   ['impuesto', 'IMPUESTOS REGISTRADOS', 'Total impuestos registrados']
 ];
 

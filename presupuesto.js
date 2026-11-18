@@ -15,7 +15,7 @@ const GRUPOS = [
   { clave: 'ingreso', nombre: 'Ingresos' },
   { clave: 'costo', nombre: 'Costos' },
   { clave: 'gasto', nombre: 'Gastos' },
-  { clave: 'extraordinario', nombre: 'Otros (extraordinarios)' }
+  { clave: 'extraordinario', nombre: 'Otros egresos' }
 ];
 const NUM = (v) => Number(v || 0);
 const MENSAJE_FALTA = 'Falta ejecutar el archivo 72 en Supabase para usar el presupuesto.';

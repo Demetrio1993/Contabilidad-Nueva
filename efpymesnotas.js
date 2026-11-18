@@ -168,8 +168,8 @@ export const DEFS = [
     texto: () => 'Incluye los intereses, las comisiones y los gastos bancarios del período, reconocidos por el método de acumulación. [Completar: intereses pagados en el año, que se revelan también en el estado de flujos de efectivo.]'
   },
   {
-    clave: 'extraordinarios', tipo: 'resultado', titulo: 'Otros gastos y egresos', bandas: [8],
-    ref: 'Estado de resultados: Otros gastos y egresos (cuentas 7.x del catálogo, llamadas "extraordinarias" en los demás informes).',
+    clave: 'extraordinarios', tipo: 'resultado', titulo: 'Otros egresos', bandas: [8],
+    ref: 'Estado de resultados: Otros gastos y egresos (grupo 7.2 del catálogo).',
     texto: () => 'Comprende partidas ajenas a la operación normal del negocio. La NIIF para las PYMES no permite presentar ni describir ninguna partida de ingreso o gasto como extraordinaria (Sección 5); por eso, en estos estados las cuentas de egresos extraordinarios del catálogo se muestran como "Otros gastos y egresos", con su naturaleza e importe en el cuadro. [Completar: naturaleza de cada partida y si debe reclasificarse a otro rubro, por ejemplo a gastos de operación.]'
   },
   {

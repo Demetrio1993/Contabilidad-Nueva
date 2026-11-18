@@ -224,14 +224,14 @@ async function vistaEmpresaDatos(id) {
 
 const TIPOS = {
   activo: 'Activos', pasivo: 'Pasivos', patrimonio: 'Patrimonio', ingreso: 'Ingresos',
-  costo: 'Costos', gasto: 'Gastos', extraordinario: 'Extraordinarios'
+  costo: 'Costos', gasto: 'Gastos', extraordinario: 'Otros egresos'
 };
 const CLASIF = {
   activo_corriente: 'Activo corriente', activo_no_corriente: 'Activo no corriente',
   pasivo_corriente: 'Pasivo corriente', pasivo_no_corriente: 'Pasivo no corriente',
   patrimonio: 'Patrimonio', resultado_ingresos: 'Resultado: ingresos',
   resultado_costos: 'Resultado: costos', resultado_gastos: 'Resultado: gastos',
-  resultado_extraordinarios: 'Resultado: extraordinarios', resultado_impuesto: 'Resultado: impuesto'
+  resultado_extraordinarios: 'Resultado: otros egresos', resultado_impuesto: 'Resultado: impuesto'
 };
 
 function opciones(mapa, conVacio) {
