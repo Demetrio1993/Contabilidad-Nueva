@@ -91,7 +91,7 @@ export const DEFS = [
   {
     clave: 'inventarios', tipo: 'balance', titulo: 'Inventarios', n3: ['1.1.05'], pref: ['1.1.05.'],
     ref: 'Estado de situación financiera: Inventarios. Estado de resultados: Costos.',
-    texto: () => 'Los inventarios se miden al menor entre el costo, determinado por el método PEPS, y el precio de venta estimado menos los costos de terminación y venta (Sección 13). El inventario final se toma de [Completar: conteo físico o del sistema de inventario] a la fecha de cierre. El costo de los inventarios reconocido como gasto en el año se presenta en la nota de costos. [Confirmar: inventarios dados en garantía y rebajas por obsolescencia o deterioro.]'
+    texto: () => 'Los inventarios se miden al menor entre el costo, determinado por el método PEPS, y el precio de venta estimado menos los costos de terminación y venta (Sección 13). El inventario final se toma de [Completar: conteo físico o del sistema de inventario] a la fecha de cierre. El costo de los inventarios reconocido como gasto en el año se presenta en la nota de costos. Los suministros e insumos que se consumen al comprarlos se cargan directamente a costos o gastos del período; al cierre se hace conteo físico solo de las existencias no consumidas y, si las hay, de los servicios en curso pendientes de facturar, que se reconocen como inventario. [Confirmar: inventarios dados en garantía y rebajas por obsolescencia o deterioro; si no hay existencias ni servicios en curso al cierre, indicar que el saldo es cero.]'
   },
   {
     clave: 'prepagados', tipo: 'balance', titulo: 'Impuestos y gastos pagados por adelantado', n3: ['1.1.06'], pref: ['1.1.06.'],

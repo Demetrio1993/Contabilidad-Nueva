@@ -86,7 +86,7 @@ export function camposPorDefecto(tipo, ctx, guardado) {
 // Marcas: {contador} {idoneidad} {cedula_contador} {entidad} {ruc} {anio} {ant} {marco} {lugar} {fecha}
 //         {cliente} {cedula_cliente} {cargo_cliente} {hora}
 // "# " al inicio de un párrafo = subtítulo centrado. **texto** = negrita.
-export const TEXTO_ELABORACION = `Yo, **{contador}**, Contador Público Autorizado, con {idoneidad}{cedula_contador}, de conformidad con la Ley 57 de 1 de septiembre de 1978, que reglamenta la profesión de contador público autorizado en la República de Panamá,
+export const TEXTO_ELABORACION = `Yo, **{contador}**, Contador Público Autorizado, con {idoneidad}{cedula_contador}, de conformidad con la Ley 280 de 30 de diciembre de 2021, que regula el ejercicio de la profesión de contador público autorizado en la República de Panamá,
 
 # CERTIFICO
 
