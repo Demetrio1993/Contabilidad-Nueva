@@ -226,7 +226,7 @@ const TIPOS = {
   activo: 'Activos', pasivo: 'Pasivos', patrimonio: 'Patrimonio', ingreso: 'Ingresos',
   costo: 'Costos', gasto: 'Gastos', extraordinario: 'Otros egresos'
 };
-const TIPOS_FILTRO = { ...TIPOS, extraordinario: 'Otros egresos (solo 7.2)', grupo7: 'Otros ingresos y egresos (grupo 7)' };
+const TIPOS_FILTRO = { activo: 'Activos', pasivo: 'Pasivos', patrimonio: 'Patrimonio', ingreso: 'Ingresos', costo: 'Costos', gasto: 'Gastos', grupo7: 'Otros Ingresos y Egresos' };
 const CLASIF = {
   activo_corriente: 'Activo corriente', activo_no_corriente: 'Activo no corriente',
   pasivo_corriente: 'Pasivo corriente', pasivo_no_corriente: 'Pasivo no corriente',
