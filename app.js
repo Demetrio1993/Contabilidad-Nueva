@@ -24,6 +24,7 @@ import { seccionUsuarios, seccionEliminar } from './acceso.js';
 import { seccionImportar } from './importar.js';
 import { seccionRespaldo } from './respaldo.js';
 import { bloqueAuxiliaresCuenta } from './auxiliares.js';
+import { abrirAvisoPrivacidad } from './privacidad.js';
 
 /* ============================== acceso =============================== */
 
@@ -74,7 +75,9 @@ function vistaLogin() {
       btnEntrar,
       h('div', { class: 'acciones' },
         h('button', { class: 'btn btn-sec', type: 'button', onclick: crearCuenta }, 'Crear cuenta')),
-      h('button', { class: 'enlace', type: 'button', onclick: olvide }, 'Olvidé mi contraseña')));
+      h('button', { class: 'enlace', type: 'button', onclick: olvide }, 'Olvidé mi contraseña'),
+      h('p', { class: 'ayuda' }, 'Al ingresar o crear una cuenta aceptas el tratamiento de datos descrito en el ',
+        h('button', { class: 'enlace', type: 'button', onclick: abrirAvisoPrivacidad }, 'aviso de privacidad'), '.')));
 }
 
 function vistaNuevaClave() {

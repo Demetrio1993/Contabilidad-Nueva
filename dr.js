@@ -35,7 +35,7 @@ function specsRenta({ filas, base, obs, anio, empresa }) {
     notas: ['Ingresos, costos y gastos: movimiento del año. Activo, pasivo y patrimonio: saldo al 31 de diciembre.',
       'Los renglones resaltados salen de fórmulas: totales, renta gravable, impuesto causado, seguro educativo, cuota de la CSS y partidas.',
       'Las líneas marcadas (manual) tienen un monto escrito a mano que reemplaza al calculado. Los renglones "Menos:" van en positivo.',
-      'Impuesto causado (102 y 113): (renta neta gravable - 11,000.00) x 15 %. Seguro educativo: 2.75 %. CSS: solo si la línea 8 pasa de 9,600.00; 52 % (48 % si es la única retribución y no supera los 35 años) x 13.50 %; partidas de la CSS en 0.00.',
+      'Impuesto causado (102 y 113): (renta neta gravable - 11,000.00) x 15 %. Seguro educativo: 2.75 %. CSS: solo si la línea 8 pasa de 9,600.00; solo se calcula si son la única retribución y el contribuyente no supera los 35 años: 52 % de la línea 8 (se descuenta el 48 %) x 13.50 %; partidas de la CSS en 0.00.',
       'PREINFORME: esta declaración es un preinforme y los montos podrían cambiar hasta su presentación ante la DGI.']
   }];
   const det = base.filter((b) => b.valido && b.renglon != null)
@@ -377,7 +377,7 @@ export async function vistaRenta(id) {
     return h('div', { class: 'tarjeta' },
       h('h3', null, `Cuota de la CSS ${est.anio}`),
       h('label', { class: 'fila-check' }, check, h('span', null, 'El contribuyente no supera los 35 años')),
-      h('p', { class: 'ayuda' }, 'Los honorarios de la línea 8 deben pasar de B/. 9,600.00; si no, no se calcula la cuota (líneas 122 y 123). Si son la única retribución de ingresos y el contribuyente no supera los 35 años, se aplica el 48 % a la línea 8; en los demás casos, el 52 %. La cuota se paga completa al presentar la declaración, por eso las partidas de la CSS quedan en 0.00.'));
+      h('p', { class: 'ayuda' }, 'Los honorarios de la línea 8 deben pasar de B/. 9,600.00; si no, no se calcula la cuota (líneas 122 y 123). Si son la única retribución de ingresos y el contribuyente no supera los 35 años, la línea 122 es el 52 % de la línea 8 (se descuenta el 48 %); en los demás casos queda en 0.00 y se escribe a mano con el lápiz. La cuota se paga completa al presentar la declaración, por eso las partidas de la CSS quedan en 0.00.'));
   }
 
   function bloquePreinforme() {

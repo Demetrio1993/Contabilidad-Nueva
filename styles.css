@@ -365,7 +365,9 @@ textarea { width: 100%; padding: 10px 12px; font-size: 1rem; font-family: inheri
 input.drsal-in { width: 6.5rem; min-width: 0; padding: 6px 8px; text-align: right; }
 .tabla.drsal-ret { min-width: 0; }
 .tabla.drsal-ret td:first-child { min-width: 0; }
-/* FIN DEL ARCHIVO styles.css */
 .rango-fechas, .rango-cuentas { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
 .rango-campo { display: flex; flex-direction: column; gap: 2px; flex: 1 1 140px; min-width: 0; }
+
+.aviso-priv h3 { font-size: 0.95rem; margin: 12px 0 2px; }
+.aviso-priv p { margin: 0 0 4px; line-height: 1.45; }
 /* FIN DEL ARCHIVO styles.css */
