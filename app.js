@@ -226,6 +226,7 @@ const TIPOS = {
   activo: 'Activos', pasivo: 'Pasivos', patrimonio: 'Patrimonio', ingreso: 'Ingresos',
   costo: 'Costos', gasto: 'Gastos', extraordinario: 'Otros egresos'
 };
+const TIPOS_FILTRO = { ...TIPOS, extraordinario: 'Otros egresos (solo 7.2)', grupo7: 'Otros ingresos y egresos (grupo 7)' };
 const CLASIF = {
   activo_corriente: 'Activo corriente', activo_no_corriente: 'Activo no corriente',
   pasivo_corriente: 'Pasivo corriente', pasivo_no_corriente: 'Pasivo no corriente',
@@ -265,7 +266,7 @@ async function vistaCatalogo(id) {
   function pintar() {
     const t = filtro.texto.toLowerCase();
     const vistas = cuentas.filter((c) =>
-      (!filtro.tipo || c.tipo === filtro.tipo) &&
+      (!filtro.tipo || (filtro.tipo === 'grupo7' ? (c.numero === '7' || c.numero.startsWith('7.')) : c.tipo === filtro.tipo)) &&
       (!filtro.anexo || c.lleva_anexo) &&
       (!t || c.numero.includes(t) || c.nombre.toLowerCase().includes(t)));
     lista.replaceChildren(...vistas.map((c) =>
@@ -441,7 +442,7 @@ async function vistaCatalogo(id) {
     oninput: (e) => { filtro.texto = e.target.value.trim(); pintar(); }
   });
   const tipo = h('select', { onchange: (e) => { filtro.tipo = e.target.value; pintar(); } },
-    h('option', { value: '' }, 'Todos los tipos'), opciones(TIPOS, false));
+    h('option', { value: '' }, 'Todos los tipos'), opciones(TIPOS_FILTRO, false));
   const soloAnexo = h('input', { type: 'checkbox', onchange: (e) => { filtro.anexo = e.target.checked; pintar(); } });
 
   // Catálogo maestro (script 92): todas las empresas parten del mismo catálogo, con sus renglones y anexos de la DR
