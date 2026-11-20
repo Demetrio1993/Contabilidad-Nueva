@@ -5,7 +5,7 @@
 import { db, h, toast, campo, traducirError, hoy, VERSION } from './lib.js';
 import { descargar } from './exportar.js';
 import { construirPdfPymes } from './efpymespdf.js';
-import { CAMPOS, TEXTO_DEFECTO, camposPorDefecto, generalesPorDefecto, construirCarta } from './efpymescert.js';
+import { CAMPOS, TEXTO_DEFECTO, camposPorDefecto, generalesPorDefecto, construirDocsSistema } from './efpymescert.js';
 
 const TIPO = 'sistema';
 
@@ -55,8 +55,9 @@ export function seccionCertSistema(empresa) {
     const salida = (modo) => async (ev) => {
       const b = ev && ev.target; if (b) b.disabled = true;
       try {
-        const doc = construirCarta(TIPO, ctx, reunir());
-        const bytes = construirPdfPymes([doc], { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } });
+        const docs = construirDocsSistema(ctx, reunir());
+        const doc = docs[0];
+        const bytes = construirPdfPymes(docs, { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } });
         const base = `${empresa.razon_social}-certificacion-del-sistema`.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, '').trim().replace(/\s+/g, '-');
         const nombre = base + '.pdf';
         if (modo === 'compartir') {
@@ -78,7 +79,7 @@ export function seccionCertSistema(empresa) {
 
     caja.replaceChildren(
       h('h2', null, 'Certificación del sistema contable'),
-      h('p', { class: 'ayuda' }, 'Certificación del CPA sobre el uso de un sistema de registros de contabilidad por medios electrónicos, para conservar junto con la documentación del programa a disposición de la DGI (Resolución DGI 201-1990 de 1998, numeral 6, puntos 4 y 5). Tus generales (idoneidad, cédula) se toman de "Mis generales" de la pestaña Estados Financieros Pymes.'),
+      h('p', { class: 'ayuda' }, 'Texto único de la Certificación-Declaración aprobado por la Resolución DGI 201-909 de 24 de julio de 1996 (Gaceta Oficial 23,091), que exige el artículo 6 del Decreto Ejecutivo 34 de 1998. Tiene dos partes que se firman por separado, la Certificación del CPA y la Declaración del contribuyente, más un anexo descriptivo. La resolución pide presentarla en papel simple tamaño legal, en original y con una copia para el contribuyente; se conserva a disposición de la DGI junto con la documentación del programa. Los datos del equipo (casillas 7 a 10) están adaptados a un sistema en la nube; el resto del texto no se toca. Tus generales (idoneidad, cédula) se toman de "Mis generales" de la pestaña Estados Financieros Pymes.'),
       !g.idoneidad ? h('div', { class: 'aviso-lectura' }, h('strong', null, 'Falta tu número de idoneidad.'), h('p', null, 'Escríbelo en "Mis generales" (pestaña Estados Financieros Pymes, Certificaciones) y saldrá aquí.')) : null,
       inputs.map(({ e, input }) => campo(e, input)),
       campo('Texto de la certificación', area, 'Las marcas entre llaves, como {entidad} o {fecha}, se reemplazan con los datos de arriba al generar el PDF. Los párrafos se separan con una línea en blanco; **así** va en negrita; "# Título" va centrado.'),

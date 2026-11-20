@@ -42,12 +42,18 @@ export const CAMPOS = {
     ['fecha', 'Fecha de emisión (AAAA-MM-DD)']
   ],
   sistema: [
-    ['entidad', 'Entidad o titular de los registros'],
-    ['ruc', 'RUC de la entidad'],
-    ['sistema', 'Nombre del sistema'],
-    ['version', 'Versión del sistema'],
-    ['norma', 'Norma que se cita'],
-    ['alcance', 'Alcance de la revisión'],
+    ['entidad', 'Contribuyente (nombre o razón social)'],
+    ['ruc', 'RUC del contribuyente'],
+    ['tipo_sistema', 'Clase de sistema (casilla 4 del texto oficial)'],
+    ['equipo', 'Equipo utilizado: tipo (casilla 7)'],
+    ['marca', 'Equipo: marca (casilla 8)'],
+    ['modelo', 'Equipo: modelo (casilla 9)'],
+    ['programa', 'Programa: nombre y versión (casilla 10)'],
+    ['rep_nombre', 'Declarante: nombre del contribuyente o representante legal'],
+    ['rep_cedula', 'Declarante: cédula de identidad personal'],
+    ['rep_domicilio', 'Declarante: dirección donde recibe notificaciones'],
+    ['rep_condicion', 'Declarante: en condición de (titular, representante legal o apoderado)'],
+    ['emp_domicilio', 'Lugar donde radica la empresa'],
     ['lugar', 'Lugar de emisión'],
     ['fecha', 'Fecha de emisión (AAAA-MM-DD)']
   ],
@@ -84,10 +90,16 @@ export function camposPorDefecto(tipo, ctx, guardado) {
     dir_cliente: e.direccion || '',
     tel_cliente: e.telefono || '',
     correo_cliente: e.correo || '',
-    sistema: 'Contabilidad (aplicación web para pymes de Panamá)',
-    version: ctx.version || '',
-    norma: 'Resolución DGI N.º 201-1990 de 21 de julio de 1998 (Gaceta Oficial N.º 23,601 de 5 de agosto de 1998), numeral 6, puntos 4 y 5, y Resolución DGI N.º 201-909 de 24 de julio de 1996',
-    alcance: 'pruebas de funcionamiento del sistema con datos de prueba y con los registros de la entidad, y revisión de sus controles y de su documentación',
+    tipo_sistema: 'registros de contabilidad, comprobantes y archivos',
+    equipo: 'servicio en la nube, con acceso desde computadora, tableta o teléfono con navegador de internet',
+    marca: 'Supabase (servicio en la nube)',
+    modelo: 'base de datos PostgreSQL administrada',
+    programa: `Contabilidad (aplicación web para pymes de Panamá), versión ${ctx.version || ''}`,
+    rep_nombre: e.representante_legal || e.razon_social || '',
+    rep_cedula: e.cedula_representante || '',
+    rep_domicilio: e.direccion || '',
+    rep_condicion: e.tipo_persona === 'juridica' ? 'representante legal' : 'titular del negocio',
+    emp_domicilio: e.direccion || '',
     hora: '',
     copias: 'Digital (PDF) y, si el cliente lo pide, impresa'
   };
@@ -148,31 +160,45 @@ ______________________________________________________________________________
 
 Firman las partes en señal de conformidad, en la fecha y hora indicadas.`;
 
-export const TEXTO_SISTEMA = `Yo, **{contador}**, Contador Público Autorizado, con {idoneidad}{cedula_contador}, de conformidad con la Ley 280 de 30 de diciembre de 2021, que regula el ejercicio de la profesión de contador público autorizado en la República de Panamá, y con lo dispuesto en la {norma}, certifico lo siguiente:
+export const TEXTO_SISTEMA = `# CERTIFICACIÓN DEL CONTADOR PÚBLICO AUTORIZADO
 
-**Primero.** Que he revisado el sistema de contabilidad **{sistema}**, versión {version}, que **{entidad}** ({ruc}) utiliza para llevar sus registros de contabilidad por medios electrónicos.
+Yo, **{contador}**, con cédula de identidad personal N.º {cedula_cpa}, Contador Público Autorizado con Licencia N.º {lic}, con domicilio en {domicilio_cpa}, en pleno conocimiento de las facultades legales expido y firmo la siguiente CERTIFICACIÓN:
 
-**Segundo.** Que el sistema seguirá las normas de contabilidad generalmente aceptadas en la República de Panamá y, en la presentación de los estados financieros, la estructura de la NIIF para las PYMES. Lleva los registros por el método de partida doble, con base en el devengado y en balboas, y permite preparar el libro diario, el libro mayor, el balance de comprobación, el balance general y el estado de resultados, además de los auxiliares de cuentas por cobrar, cuentas por pagar y activos fijos.
+Que he verificado y comprobado que el sistema computarizado de {tipo_sistema} y demás documentación análoga, anexa o complementaria a que se refiere el Decreto N.º 26 de 1.º de febrero de 1996, de propiedad del contribuyente **{entidad}**, con {ruc}, cumple con los requisitos y condiciones establecidas en las Normas de Contabilidad generalmente aceptadas en Panamá y los preceptos contenidos en el Decreto N.º 26 de 1.º de febrero de 1996.
 
-**Tercero.** Que cada asiento queda registrado con su fecha, número, descripción, referencia, cuentas, débitos y créditos; que el sistema exige que los débitos sean iguales a los créditos, y que los asientos se numeran en orden cronológico.
+Que el equipo utilizado e identificado para el uso del sistema consiste en {equipo}, marca {marca}, modelo {modelo}, y el programa es denominado: {programa}, el cual de acuerdo a las pruebas realizadas no permite la alteración de la información y los datos consignados.
 
-**Cuarto.** Que el sistema permite imprimir o descargar en PDF y en Excel los libros y estados mencionados, con su encabezado y período, cada vez que se necesiten, y exportar una copia completa de los registros de la entidad desde cualquier equipo con acceso al sistema, incluidos los de las oficinas del titular en Panamá.
+Panamá, {fecha}.
 
-**Quinto.** Que el sistema conserva una bitácora con el usuario, la fecha y la hora de cada alta, modificación, anulación o eliminación de los registros principales, y que el acceso se controla por usuario y por perfil.
+# DECLARACIÓN DEL CONTRIBUYENTE
 
-**Sexto.** Que se mantienen copias de seguridad diarias cifradas en dos sitios independientes, y que existe un manual de usuario que describe el funcionamiento del sistema y sus controles.
+Yo, **{rep_nombre}**, con cédula de identidad personal N.º {rep_cedula}, con domicilio en {rep_domicilio}, en condición de {rep_condicion}, con {ruc}, domicilio en {emp_domicilio}, con pleno conocimiento legal de este acto declaro que la información del sistema, del programa y del equipo descrito anteriormente por el Lic. {contador}, Contador Público Autorizado, con cédula {cedula_cpa}, Licencia de CPA N.º {lic}, reposan bajo mi custodia y responsabilidad, la cual pongo a disposición de la Dirección General de Ingresos del Ministerio de Hacienda y Tesoro.
 
-**Séptimo.** Que mi revisión consistió en {alcance}. Esta certificación se refiere al sistema y no es un dictamen sobre la razonabilidad de los estados financieros de la entidad.
+Expedido y firmado hoy {fecha}.
 
-**Octavo.** Que el titular de los registros deberá conservar a disposición de la Dirección General de Ingresos la documentación completa del programa o aplicación y esta certificación.
+# ANEXO: DESCRIPCIÓN DEL SISTEMA
 
-Se expide en {lugar}, el {fecha}, a solicitud del interesado.`;
+Este anexo describe el sistema y se acompaña a la certificación para conservarlo con la documentación del programa. Se emite con base en los artículos 6 y 8 del Decreto Ejecutivo N.º 34 de 6 de abril de 1998 (Gaceta Oficial N.º 23,520 de 13 de abril de 1998) y en la Resolución DGI N.º 201-909 de 24 de julio de 1996 (Gaceta Oficial N.º 23,091 de 31 de julio de 1996).
+
+**1.** Los registros se llevan en español, en balboas, por el método de partida doble y con base en el devengado, siguiendo las normas de contabilidad generalmente aceptadas en Panamá y, en la presentación de los estados financieros, la estructura de la NIIF para las PYMES. El sistema genera el libro diario, el libro mayor, el balance de comprobación, el balance general, el estado de resultados y los auxiliares de cuentas por cobrar, cuentas por pagar y activos fijos.
+
+**2.** Cada asiento queda registrado con su fecha, número, descripción, referencia, cuentas, débitos y créditos. El sistema exige que los débitos sean iguales a los créditos y numera los asientos en orden cronológico.
+
+**3.** Los libros y estados se pueden imprimir o descargar en PDF y en Excel, con su encabezado y período, y se puede exportar una copia completa de los registros de la entidad desde cualquier equipo con acceso al sistema, incluidos los de las oficinas del titular en Panamá.
+
+**4.** El sistema conserva una bitácora con el usuario, la fecha y la hora de cada alta, modificación, anulación o eliminación de los registros principales. El acceso se controla por usuario y por perfil.
+
+**5.** Se mantienen copias de seguridad diarias cifradas en dos sitios independientes, y existe un manual de usuario que describe el funcionamiento del sistema y sus controles.
+
+**6.** El titular de los registros conserva a disposición de la Dirección General de Ingresos la documentación completa del programa o aplicación y esta certificación-declaración, de conformidad con el artículo 6 del Decreto Ejecutivo N.º 34 de 1998.
+
+Esta certificación se refiere al sistema y no es un dictamen sobre la razonabilidad de los estados financieros de la entidad.`;
 
 export const TEXTO_DEFECTO = { elaboracion: TEXTO_ELABORACION, entrega: TEXTO_ENTREGA, sistema: TEXTO_SISTEMA };
 
 export const TITULOS = {
   elaboracion: 'CERTIFICACIÓN DEL CONTADOR PÚBLICO AUTORIZADO\nSobre la elaboración de la contabilidad y de los estados financieros',
-  sistema: 'CERTIFICACIÓN DEL CONTADOR PÚBLICO AUTORIZADO\nSobre el sistema de registros de contabilidad por medios electrónicos',
+  sistema: 'CERTIFICACIÓN-DECLARACIÓN\nUso de sistemas magnéticos · Resolución DGI N.º 201-909 de 24 de julio de 1996',
   entrega: 'ACTA DE ENTREGA DE LA CONTABILIDAD Y DE LOS ESTADOS FINANCIEROS\nRecibido conforme'
 };
 
@@ -197,7 +223,10 @@ export function variables(tipo, ctx, campos) {
     cedula_contador: gc.cedula ? ` y cédula N.º ${gc.cedula}` : '',
     entidad: campos.entidad, ruc: campos.ruc ? `RUC ${campos.ruc}` : '', periodo: campos.periodo,
     marco: campos.marco, anio: ctx.anio, ant: ctx.anio - 1,
-    sistema: campos.sistema, version: campos.version, norma: campos.norma, alcance: campos.alcance,
+    tipo_sistema: campos.tipo_sistema, equipo: campos.equipo, marca: campos.marca, modelo: campos.modelo, programa: campos.programa,
+    rep_nombre: campos.rep_nombre, rep_cedula: campos.rep_cedula, rep_domicilio: campos.rep_domicilio,
+    rep_condicion: campos.rep_condicion, emp_domicilio: campos.emp_domicilio,
+    cedula_cpa: gc.cedula, lic: gc.idoneidad, domicilio_cpa: gc.direccion,
     lugar, fecha: campos.fecha ? fechaLarga(campos.fecha) : '',
     cliente: campos.cliente, cedula_cliente: campos.cedula_cliente, cargo_cliente: (campos.cargo_cliente || '').toLowerCase(),
     hora: campos.hora, copias: (campos.copias || '').replace(/^./, (c) => c.toLowerCase())
@@ -223,8 +252,10 @@ export function construirCarta(tipo, ctx, guardado) {
 
   const doc = { tipo: 'carta', clave: tipo, hoja: tipo === 'entrega' ? 'Recibido conforme' : (tipo === 'sistema' ? 'Certificación del sistema' : 'Certificación'), titulo: TITULOS[tipo], membrete, parrafos, campos: [], firmas: [] };
   if (tipo === 'sistema') {
-    doc.campos = [['Entidad', campos.entidad], ['RUC', campos.ruc], ['Sistema', `${campos.sistema} · versión ${campos.version}`]];
-    doc.firmas = [{ lineas: lineasContador }];
+    doc.campos = [['Contribuyente', campos.entidad], ['RUC', campos.ruc], ['Programa', campos.programa]];
+    const lc = [campos.rep_nombre || 'Contribuyente', 'Declaración del contribuyente'];
+    lc.push(campos.rep_cedula ? `Cédula N.º ${campos.rep_cedula}` : 'Cédula N.º [Completar]');
+    doc.firmas = [{ lineas: lineasContador }, { lineas: lc }];
   } else if (tipo === 'elaboracion') {
     doc.campos = [['Entidad', campos.entidad], ['RUC', campos.ruc], ['Período', campos.periodo]];
     doc.firmas = [{ lineas: lineasContador }];
@@ -241,6 +272,24 @@ export function construirCarta(tipo, ctx, guardado) {
     doc.firmas = [{ lineas: [...lineasContador.slice(0, 1), 'Entrega · Contador Público Autorizado', ...lineasContador.slice(2)] }, { lineas: lc }];
   }
   return doc;
+}
+
+// Certificación del sistema: el texto único de la Resolución DGI 201-909 de 1996 tiene dos partes que se firman
+// por separado (Certificación del CPA y Declaración del contribuyente). Se arman como hojas distintas, cada una
+// con su firma, y el anexo descriptivo en una tercera. Si el texto editado no trae esos subtítulos, sale una sola hoja.
+export function construirDocsSistema(ctx, guardado) {
+  const doc = construirCarta('sistema', ctx, guardado);
+  const [firmaCpa, firmaContribuyente] = doc.firmas;
+  const cortes = [];
+  doc.parrafos.forEach((p, i) => { if (p.centro) cortes.push(i); });
+  if (cortes.length < 2) return [doc];
+  const trozo = (desde, hasta) => doc.parrafos.slice(desde, hasta);
+  const docs = [];
+  const iDecl = cortes[1], iAnexo = cortes[2];
+  docs.push({ ...doc, parrafos: trozo(cortes[0], iDecl), firmas: [firmaCpa] });
+  docs.push({ ...doc, campos: [], parrafos: trozo(iDecl, iAnexo), firmas: [firmaContribuyente] });
+  if (iAnexo !== undefined) docs.push({ ...doc, campos: [], parrafos: trozo(iAnexo), firmas: [firmaCpa] });
+  return docs;
 }
 
 // FIN DEL ARCHIVO efpymescert.js
