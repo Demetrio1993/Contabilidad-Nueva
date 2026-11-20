@@ -24,7 +24,7 @@ import { seccionUsuarios, seccionEliminar } from './acceso.js';
 import { seccionImportar } from './importar.js';
 import { seccionRespaldo } from './respaldo.js';
 import { bloqueAuxiliaresCuenta } from './auxiliares.js';
-import { abrirAvisoPrivacidad } from './privacidad.js';
+import { abrirAvisoPrivacidad, pedirAceptacionAviso, seccionAceptaciones } from './privacidad.js';
 import { seccionCertSistema } from './certsistema.js';
 
 /* ============================== acceso =============================== */
@@ -77,8 +77,8 @@ function vistaLogin() {
       h('div', { class: 'acciones' },
         h('button', { class: 'btn btn-sec', type: 'button', onclick: crearCuenta }, 'Crear cuenta')),
       h('button', { class: 'enlace', type: 'button', onclick: olvide }, 'Olvidé mi contraseña'),
-      h('p', { class: 'ayuda' }, 'Al ingresar o crear una cuenta aceptas el tratamiento de datos descrito en el ',
-        h('button', { class: 'enlace', type: 'button', onclick: abrirAvisoPrivacidad }, 'aviso de privacidad'), '.')));
+      h('p', { class: 'ayuda' }, 'Al entrar se te pedirá aceptar el tratamiento de datos descrito en el ',
+        h('button', { class: 'enlace', type: 'button', onclick: abrirAvisoPrivacidad }, 'aviso de privacidad'), '. Puedes leerlo antes de ingresar.')));
 }
 
 function vistaNuevaClave() {
@@ -220,6 +220,7 @@ async function vistaEmpresaDatos(id) {
     seccionRespaldo(e),
     seccionCertSistema(e),
     seccionUsuarios(e),
+    seccionAceptaciones(e),
     seccionImportar(e),
     seccionEliminar(e)
   ]));
@@ -502,6 +503,7 @@ async function render() {
     estado.email = sesion.user.email || '';
     estado.userId = sesion.user.id || null;
     if (estado.recuperando) { mostrar(vistaNuevaClave()); return; }
+    pedirAceptacionAviso(estado.userId); // no bloquea: si no ha aceptado el aviso, se lo muestra
 
     const p = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
     if (p.length === 0 || p[0] === 'empresas') { await vistaEmpresas(); return; }
