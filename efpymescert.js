@@ -41,6 +41,16 @@ export const CAMPOS = {
     ['lugar', 'Lugar de emisión'],
     ['fecha', 'Fecha de emisión (AAAA-MM-DD)']
   ],
+  sistema: [
+    ['entidad', 'Entidad o titular de los registros'],
+    ['ruc', 'RUC de la entidad'],
+    ['sistema', 'Nombre del sistema'],
+    ['version', 'Versión del sistema'],
+    ['norma', 'Norma que se cita'],
+    ['alcance', 'Alcance de la revisión'],
+    ['lugar', 'Lugar de emisión'],
+    ['fecha', 'Fecha de emisión (AAAA-MM-DD)']
+  ],
   entrega: [
     ['entidad', 'Entidad'],
     ['ruc', 'RUC de la entidad'],
@@ -74,6 +84,10 @@ export function camposPorDefecto(tipo, ctx, guardado) {
     dir_cliente: e.direccion || '',
     tel_cliente: e.telefono || '',
     correo_cliente: e.correo || '',
+    sistema: 'Contabilidad (aplicación web para pymes de Panamá)',
+    version: ctx.version || '',
+    norma: 'Resolución DGI N.º 201-1990 de 21 de julio de 1998 (Gaceta Oficial N.º 23,601 de 5 de agosto de 1998), numeral 6, puntos 4 y 5, y Resolución DGI N.º 201-909 de 24 de julio de 1996',
+    alcance: 'pruebas de funcionamiento del sistema con datos de prueba y con los registros de la entidad, y revisión de sus controles y de su documentación',
     hora: '',
     copias: 'Digital (PDF) y, si el cliente lo pide, impresa'
   };
@@ -134,10 +148,31 @@ ______________________________________________________________________________
 
 Firman las partes en señal de conformidad, en la fecha y hora indicadas.`;
 
-export const TEXTO_DEFECTO = { elaboracion: TEXTO_ELABORACION, entrega: TEXTO_ENTREGA };
+export const TEXTO_SISTEMA = `Yo, **{contador}**, Contador Público Autorizado, con {idoneidad}{cedula_contador}, de conformidad con la Ley 280 de 30 de diciembre de 2021, que regula el ejercicio de la profesión de contador público autorizado en la República de Panamá, y con lo dispuesto en la {norma}, certifico lo siguiente:
+
+**Primero.** Que he revisado el sistema de contabilidad **{sistema}**, versión {version}, que **{entidad}** ({ruc}) utiliza para llevar sus registros de contabilidad por medios electrónicos.
+
+**Segundo.** Que el sistema seguirá las normas de contabilidad generalmente aceptadas en la República de Panamá y, en la presentación de los estados financieros, la estructura de la NIIF para las PYMES. Lleva los registros por el método de partida doble, con base en el devengado y en balboas, y permite preparar el libro diario, el libro mayor, el balance de comprobación, el balance general y el estado de resultados, además de los auxiliares de cuentas por cobrar, cuentas por pagar y activos fijos.
+
+**Tercero.** Que cada asiento queda registrado con su fecha, número, descripción, referencia, cuentas, débitos y créditos; que el sistema exige que los débitos sean iguales a los créditos, y que los asientos se numeran en orden cronológico.
+
+**Cuarto.** Que el sistema permite imprimir o descargar en PDF y en Excel los libros y estados mencionados, con su encabezado y período, cada vez que se necesiten, y exportar una copia completa de los registros de la entidad desde cualquier equipo con acceso al sistema, incluidos los de las oficinas del titular en Panamá.
+
+**Quinto.** Que el sistema conserva una bitácora con el usuario, la fecha y la hora de cada alta, modificación, anulación o eliminación de los registros principales, y que el acceso se controla por usuario y por perfil.
+
+**Sexto.** Que se mantienen copias de seguridad diarias cifradas en dos sitios independientes, y que existe un manual de usuario que describe el funcionamiento del sistema y sus controles.
+
+**Séptimo.** Que mi revisión consistió en {alcance}. Esta certificación se refiere al sistema y no es un dictamen sobre la razonabilidad de los estados financieros de la entidad.
+
+**Octavo.** Que el titular de los registros deberá conservar a disposición de la Dirección General de Ingresos la documentación completa del programa o aplicación y esta certificación.
+
+Se expide en {lugar}, el {fecha}, a solicitud del interesado.`;
+
+export const TEXTO_DEFECTO = { elaboracion: TEXTO_ELABORACION, entrega: TEXTO_ENTREGA, sistema: TEXTO_SISTEMA };
 
 export const TITULOS = {
   elaboracion: 'CERTIFICACIÓN DEL CONTADOR PÚBLICO AUTORIZADO\nSobre la elaboración de la contabilidad y de los estados financieros',
+  sistema: 'CERTIFICACIÓN DEL CONTADOR PÚBLICO AUTORIZADO\nSobre el sistema de registros de contabilidad por medios electrónicos',
   entrega: 'ACTA DE ENTREGA DE LA CONTABILIDAD Y DE LOS ESTADOS FINANCIEROS\nRecibido conforme'
 };
 
@@ -162,6 +197,7 @@ export function variables(tipo, ctx, campos) {
     cedula_contador: gc.cedula ? ` y cédula N.º ${gc.cedula}` : '',
     entidad: campos.entidad, ruc: campos.ruc ? `RUC ${campos.ruc}` : '', periodo: campos.periodo,
     marco: campos.marco, anio: ctx.anio, ant: ctx.anio - 1,
+    sistema: campos.sistema, version: campos.version, norma: campos.norma, alcance: campos.alcance,
     lugar, fecha: campos.fecha ? fechaLarga(campos.fecha) : '',
     cliente: campos.cliente, cedula_cliente: campos.cedula_cliente, cargo_cliente: (campos.cargo_cliente || '').toLowerCase(),
     hora: campos.hora, copias: (campos.copias || '').replace(/^./, (c) => c.toLowerCase())
@@ -185,8 +221,11 @@ export function construirCarta(tipo, ctx, guardado) {
   const lineasContador = [gc.nombre, 'Contador Público Autorizado', gc.idoneidad ? `Idoneidad N.º ${gc.idoneidad}` : 'Idoneidad N.º [Completar]'];
   if (gc.cedula) lineasContador.push(`Cédula N.º ${gc.cedula}`);
 
-  const doc = { tipo: 'carta', clave: tipo, hoja: tipo === 'elaboracion' ? 'Certificación' : 'Recibido conforme', titulo: TITULOS[tipo], membrete, parrafos, campos: [], firmas: [] };
-  if (tipo === 'elaboracion') {
+  const doc = { tipo: 'carta', clave: tipo, hoja: tipo === 'entrega' ? 'Recibido conforme' : (tipo === 'sistema' ? 'Certificación del sistema' : 'Certificación'), titulo: TITULOS[tipo], membrete, parrafos, campos: [], firmas: [] };
+  if (tipo === 'sistema') {
+    doc.campos = [['Entidad', campos.entidad], ['RUC', campos.ruc], ['Sistema', `${campos.sistema} · versión ${campos.version}`]];
+    doc.firmas = [{ lineas: lineasContador }];
+  } else if (tipo === 'elaboracion') {
     doc.campos = [['Entidad', campos.entidad], ['RUC', campos.ruc], ['Período', campos.periodo]];
     doc.firmas = [{ lineas: lineasContador }];
   } else {

@@ -25,6 +25,7 @@ import { seccionImportar } from './importar.js';
 import { seccionRespaldo } from './respaldo.js';
 import { bloqueAuxiliaresCuenta } from './auxiliares.js';
 import { abrirAvisoPrivacidad } from './privacidad.js';
+import { seccionCertSistema } from './certsistema.js';
 
 /* ============================== acceso =============================== */
 
@@ -217,6 +218,7 @@ async function vistaEmpresaDatos(id) {
       irA(`#/empresa/${id}/datos`);
     }),
     seccionRespaldo(e),
+    seccionCertSistema(e),
     seccionUsuarios(e),
     seccionImportar(e),
     seccionEliminar(e)
