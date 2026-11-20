@@ -126,11 +126,15 @@ export async function vistaRenta(id) {
   }
 
   async function avisarCorreo(aprobId) {
-    try {
-      const r = await db.functions.invoke('notificar-aprobacion', { body: { aprobacion_id: aprobId } });
-      if (r.error) return false;
-      return !!(r.data && r.data.ok);
-    } catch (e) { return false; }
+    // La función está desplegada en Supabase con el nombre "super-function"; se prueba también el nombre original.
+    for (const nombre of ['super-function', 'notificar-aprobacion']) {
+      try {
+        const r = await db.functions.invoke(nombre, { body: { aprobacion_id: aprobId } });
+        if (r.error) continue;
+        return !!(r.data && r.data.ok);
+      } catch (e) { /* prueba el siguiente nombre */ }
+    }
+    return false;
   }
 
   function fechaHora(t) {
