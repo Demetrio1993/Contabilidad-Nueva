@@ -1,10 +1,12 @@
-// Pestaña Datos de cada empresa: certificación del contador sobre el sistema de contabilidad electrónico.
+// Pestaña Datos de cada empresa: certificación del contador sobre el sistema de contabilidad electrónico y
+// documentación del sistema (docsistema.js), ambas descargables por separado o en un solo PDF.
 // Reutiliza las certificaciones de efpymescert.js. Se guarda en efpymes_certificados (tipo 'sistema', anio 0),
 // de modo que cada cliente tiene su propio texto, campos y fecha. Los generales del contador se toman de
 // efpymes_contador (los mismos de las certificaciones de los estados financieros).
 import { db, h, toast, campo, traducirError, hoy, VERSION } from './lib.js';
 import { descargar } from './exportar.js';
 import { construirPdfPymes } from './efpymespdf.js';
+import { construirDocumentacion } from './docsistema.js';
 import { CAMPOS, TEXTO_DEFECTO, camposPorDefecto, generalesPorDefecto, construirDocsSistema } from './efpymescert.js';
 
 const TIPO = 'sistema';
@@ -52,19 +54,23 @@ export function seccionCertSistema(empresa) {
     });
     const rest = h('button', { class: 'btn btn-sec', type: 'button', onclick: () => { area.value = TEXTO_DEFECTO[TIPO]; } }, 'Restaurar texto original');
 
-    const salida = (modo) => async (ev) => {
+    // qué = 'cert' (certificación), 'doc' (documentación del sistema) o 'ambos' (un solo PDF con las dos cosas)
+    const salida = (modo, que = 'cert') => async (ev) => {
       const b = ev && ev.target; if (b) b.disabled = true;
       try {
-        const docs = construirDocsSistema(ctx, reunir());
+        const docs = [];
+        if (que !== 'doc') docs.push(...construirDocsSistema(ctx, reunir()));
+        if (que !== 'cert') docs.push(construirDocumentacion(ctx));
         const doc = docs[0];
         const bytes = construirPdfPymes(docs, { empresa: { razon_social: empresa.razon_social, ruc: empresa.ruc, dv: empresa.dv } });
-        const base = `${empresa.razon_social}-certificacion-del-sistema`.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, '').trim().replace(/\s+/g, '-');
+        const sufijo = { cert: 'certificacion-del-sistema', doc: 'documentacion-del-sistema', ambos: 'certificacion-y-documentacion-del-sistema' }[que];
+        const base = `${empresa.razon_social}-${sufijo}`.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, '').trim().replace(/\s+/g, '-');
         const nombre = base + '.pdf';
         if (modo === 'compartir') {
           const f = new File([bytes], nombre, { type: 'application/pdf' });
           try {
             if (navigator.canShare && navigator.canShare({ files: [f] })) {
-              await navigator.share({ files: [f], title: doc.titulo, text: `Certificación del sistema · ${empresa.razon_social}` });
+              await navigator.share({ files: [f], title: doc.titulo, text: `${que === 'doc' ? 'Documentación del sistema' : 'Certificación del sistema'} · ${empresa.razon_social}` });
               toast('Listo para enviar.', 'ok'); return;
             }
           } catch (e) { if (e && e.name === 'AbortError') return; }
@@ -85,7 +91,13 @@ export function seccionCertSistema(empresa) {
       campo('Texto de la certificación', area, 'Las marcas entre llaves, como {entidad} o {fecha}, se reemplazan con los datos de arriba al generar el PDF. Los párrafos se separan con una línea en blanco; **así** va en negrita; "# Título" va centrado.'),
       h('div', { class: 'acciones' }, puede ? guardar : null, puede ? rest : null,
         h('button', { class: 'btn btn-sec', type: 'button', onclick: salida('descargar') }, 'Descargar PDF'),
-        h('button', { class: 'btn btn-sec', type: 'button', onclick: salida('compartir') }, 'Compartir PDF')));
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: salida('compartir') }, 'Compartir PDF')),
+      h('h3', null, 'Documentación del sistema'),
+      h('p', { class: 'ayuda' }, 'PDF corto que describe el sistema, sus controles, las copias de seguridad y los servicios que usa. El titular lo conserva con la certificación a disposición de la DGI. Se arma solo con los datos de este cliente y la versión vigente; no hay nada que llenar.'),
+      h('div', { class: 'acciones' },
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: salida('descargar', 'doc') }, 'Descargar documentación'),
+        h('button', { class: 'btn btn-sec', type: 'button', onclick: salida('compartir', 'doc') }, 'Compartir documentación'),
+        h('button', { class: 'btn', type: 'button', onclick: salida('descargar', 'ambos') }, 'Descargar certificación y documentación (un PDF)')));
   }
 
   iniciar().catch((e) => {
