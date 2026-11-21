@@ -39,7 +39,13 @@ export function seccionResumenSemanal(empresa) {
   enviar.addEventListener('click', async () => {
     enviar.disabled = true;
     try {
-      const { data, error } = await db.functions.invoke('resumen-semanal', { body: { empresa_id: empresa.id } });
+      // Supabase pone a la función el nombre que le sale al crearla (aquí 'clever-responder'); se prueban los dos
+      let data = null, error = null;
+      for (const nombre of ['resumen-semanal', 'clever-responder']) {
+        const x = await db.functions.invoke(nombre, { body: { empresa_id: empresa.id } });
+        data = x.data; error = x.error;
+        if (!error || !/not found|404/i.test(String(error.message || '') + String((error.context && error.context.status) || ''))) break;
+      }
       if (error) throw error;
       if (!data || !data.ok) {
         const r0 = data && data.resultados && data.resultados[0];
