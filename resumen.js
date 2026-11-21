@@ -39,12 +39,13 @@ export function seccionResumenSemanal(empresa) {
   enviar.addEventListener('click', async () => {
     enviar.disabled = true;
     try {
-      // Supabase pone a la función el nombre que le sale al crearla (aquí 'clever-responder'); se prueban los dos
+      // Supabase le puso a la función el nombre que le salió al crearla (clever-responder). Si la ruta no existe el navegador
+      // recibe un fallo de conexión (sin código), así que se pasa al siguiente nombre ante cualquier fallo de ese tipo.
       let data = null, error = null;
-      for (const nombre of ['resumen-semanal', 'clever-responder']) {
+      for (const nombre of ['clever-responder', 'resumen-semanal']) {
         const x = await db.functions.invoke(nombre, { body: { empresa_id: empresa.id } });
         data = x.data; error = x.error;
-        if (!error || !/not found|404/i.test(String(error.message || '') + String((error.context && error.context.status) || ''))) break;
+        if (!error || (error.context && error.context.status && error.context.status !== 404)) break;
       }
       if (error) throw error;
       if (!data || !data.ok) {
@@ -52,7 +53,7 @@ export function seccionResumenSemanal(empresa) {
         toast('No se pudo enviar: ' + ((r0 && r0.error) || (data && data.error) || 'sin detalle'), 'error');
       } else toast('Resumen enviado a tu correo.', 'ok');
     } catch (e) {
-      toast(/not found|404|Failed to send/i.test(String(e && e.message)) ? 'La función resumen-semanal todavía no está creada en Supabase.' : 'No se pudo enviar: ' + traducirError(e), 'error');
+      toast('No se pudo enviar: ' + traducirError(e), 'error');
     }
     enviar.disabled = false;
     cargar();
