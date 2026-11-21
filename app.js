@@ -26,6 +26,7 @@ import { seccionRespaldo } from './respaldo.js';
 import { bloqueAuxiliaresCuenta } from './auxiliares.js';
 import { abrirAvisoPrivacidad, pedirAceptacionAviso, seccionAceptaciones } from './privacidad.js';
 import { seccionCertSistema } from './certsistema.js';
+import { seccionResumenSemanal } from './resumen.js';
 
 /* ============================== acceso =============================== */
 
@@ -219,6 +220,7 @@ async function vistaEmpresaDatos(id) {
     }),
     seccionRespaldo(e),
     seccionCertSistema(e),
+    seccionResumenSemanal(e),
     seccionUsuarios(e),
     seccionAceptaciones(e),
     seccionImportar(e),
